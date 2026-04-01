@@ -312,6 +312,7 @@ function applyDocumentZoom(zoom, options = {}) {
     currentDocumentZoom = nextZoom;
     desk.style.setProperty('--doc-zoom', String(nextZoom));
     localStorage.setItem(DOC_ZOOM_STORAGE_KEY, String(nextZoom));
+    updateDocumentImages();
 
     if (announce) {
         showStatus('Zoom ' + Math.round(nextZoom * 100) + '%', 'info', 900);
@@ -356,6 +357,7 @@ function renderDocument(doc) {
     }
 
     deskContent.appendChild(fragment);
+    updateDocumentImages();
     renderComments(doc.comments);
 
     if (doc.comments && doc.comments.length > 0) {
@@ -578,7 +580,11 @@ function renderRun(run, container, doc) {
         img.src = doc.images[run.image_id];
         img.className = 'doc-image';
         img.alt = 'Document image';
+        img.addEventListener('load', () => updateDocumentImageSize(img), { once: true });
         container.appendChild(img);
+        if (img.complete) {
+            updateDocumentImageSize(img);
+        }
         return;
     }
 
@@ -620,6 +626,21 @@ function renderRun(run, container, doc) {
     }
 
     container.appendChild(span);
+}
+
+function updateDocumentImages() {
+    if (!deskContent) return;
+
+    const images = deskContent.querySelectorAll('.doc-image');
+    images.forEach((img) => updateDocumentImageSize(img));
+}
+
+function updateDocumentImageSize(img) {
+    const intrinsicWidth = Number.parseFloat(img.dataset.intrinsicWidth) || img.naturalWidth;
+    if (!Number.isFinite(intrinsicWidth) || intrinsicWidth <= 0) return;
+
+    img.dataset.intrinsicWidth = String(intrinsicWidth);
+    img.style.width = (Math.round(intrinsicWidth * currentDocumentZoom * 100) / 100) + 'px';
 }
 
 function renderTable(table, doc) {
