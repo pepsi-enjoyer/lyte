@@ -46,6 +46,8 @@ Useful shortcuts:
 
 - `Ctrl+O` open a file
 - `Ctrl+F` find in the current document
+- `Ctrl++` / `Ctrl+-` zoom the document in or out
+- `Ctrl+Mouse Wheel` zoom the document in or out
 - `Ctrl+]` show or hide comments
 - `Ctrl+D` toggle light and dark theme
 - `Ctrl+Q` quit Hermes

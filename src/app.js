@@ -8,6 +8,7 @@ const listen = tauriApi?.event?.listen?.bind(tauriApi.event) ?? null;
 const welcomeScreen = document.getElementById('welcome-screen');
 const documentView = document.getElementById('document-view');
 const desk = document.getElementById('desk');
+const deskContent = document.getElementById('desk-content');
 const commentsPanel = document.getElementById('comments-panel');
 const commentsList = document.getElementById('comments-list');
 const recentFilesSection = document.getElementById('recent-files-section');
@@ -19,6 +20,12 @@ const findBar = document.getElementById('find-bar');
 const findInput = document.getElementById('find-input');
 const findCount = document.getElementById('find-count');
 
+const DOC_ZOOM_STORAGE_KEY = 'hermes-doc-zoom';
+const DOC_ZOOM_DEFAULT = 1;
+const DOC_ZOOM_MIN = 0.5;
+const DOC_ZOOM_MAX = 2;
+const DOC_ZOOM_STEP = 0.1;
+
 // State
 let currentDocument = null;
 let currentFilePath = null;
@@ -27,6 +34,7 @@ let findMatches = [];
 let findIndex = -1;
 let statusTimer = null;
 let findDebounceTimer = null;
+let currentDocumentZoom = DOC_ZOOM_DEFAULT;
 
 // --- Initialization ---
 
@@ -37,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     void initializeTheme();
+    initializeDocumentZoom();
     setupEventListeners();
     setupKeyboardShortcuts();
     setupTauriListeners();
@@ -56,6 +65,7 @@ function setupEventListeners() {
     document.getElementById('find-prev-btn').addEventListener('click', () => navigateFind(-1));
     recentFilesList.addEventListener('click', handleRecentFilesClick);
     desk.addEventListener('click', handleDeskClick);
+    desk.addEventListener('wheel', handleDocumentZoomWheel, { passive: false });
     commentsList.addEventListener('click', handleCommentListClick);
     findInput.addEventListener('input', scheduleFind);
     findInput.addEventListener('keydown', (e) => {
@@ -66,6 +76,16 @@ function setupEventListeners() {
 
 function setupKeyboardShortcuts() {
     document.addEventListener('keydown', (e) => {
+        if (isZoomInShortcut(e)) {
+            e.preventDefault();
+            adjustDocumentZoom(DOC_ZOOM_STEP);
+            return;
+        }
+        if (isZoomOutShortcut(e)) {
+            e.preventDefault();
+            adjustDocumentZoom(-DOC_ZOOM_STEP);
+            return;
+        }
         if (e.ctrlKey && e.key === 'o') { e.preventDefault(); handleOpenFile(); }
         if (e.ctrlKey && e.key === 'd') { e.preventDefault(); toggleTheme(); }
         if (e.ctrlKey && e.key === ']') { e.preventDefault(); toggleComments(); }
@@ -264,13 +284,62 @@ function showStatus(message, kind = 'info', timeoutMs = 2200) {
     }
 }
 
+// --- Document zoom ---
+
+function initializeDocumentZoom() {
+    const storedZoom = Number.parseFloat(localStorage.getItem(DOC_ZOOM_STORAGE_KEY));
+    applyDocumentZoom(Number.isFinite(storedZoom) ? storedZoom : DOC_ZOOM_DEFAULT, { announce: false });
+}
+
+function handleDocumentZoomWheel(event) {
+    if (!event.ctrlKey || event.deltaY === 0) return;
+
+    event.preventDefault();
+    adjustDocumentZoom(event.deltaY < 0 ? DOC_ZOOM_STEP : -DOC_ZOOM_STEP);
+}
+
+function adjustDocumentZoom(delta) {
+    applyDocumentZoom(currentDocumentZoom + delta);
+}
+
+function applyDocumentZoom(zoom, options = {}) {
+    const { announce = true } = options;
+    const nextZoom = clampDocumentZoom(zoom);
+    if (nextZoom === currentDocumentZoom && desk.style.getPropertyValue('--doc-zoom')) {
+        return;
+    }
+
+    currentDocumentZoom = nextZoom;
+    desk.style.setProperty('--doc-zoom', String(nextZoom));
+    localStorage.setItem(DOC_ZOOM_STORAGE_KEY, String(nextZoom));
+
+    if (announce) {
+        showStatus('Zoom ' + Math.round(nextZoom * 100) + '%', 'info', 900);
+    }
+}
+
+function clampDocumentZoom(zoom) {
+    const roundedZoom = Math.round(zoom * 100) / 100;
+    return Math.min(DOC_ZOOM_MAX, Math.max(DOC_ZOOM_MIN, roundedZoom));
+}
+
+function isZoomInShortcut(event) {
+    if (!event.ctrlKey || event.altKey || event.metaKey) return false;
+    return event.key === '=' || event.key === '+' || event.code === 'NumpadAdd';
+}
+
+function isZoomOutShortcut(event) {
+    if (!event.ctrlKey || event.altKey || event.metaKey) return false;
+    return event.key === '-' || event.key === '_' || event.code === 'NumpadSubtract';
+}
+
 // --- Document rendering ---
 
 function renderDocument(doc) {
     currentDocument = doc;
     welcomeScreen.style.display = 'none';
     documentView.style.display = 'flex';
-    desk.replaceChildren();
+    deskContent.replaceChildren();
     commentsVisible = false;
     commentsPanel.style.display = 'none';
     closeFindBar();
@@ -286,7 +355,7 @@ function renderDocument(doc) {
         }
     }
 
-    desk.appendChild(fragment);
+    deskContent.appendChild(fragment);
     renderComments(doc.comments);
 
     if (doc.comments && doc.comments.length > 0) {
@@ -446,7 +515,7 @@ function applyParagraphStyle(el, para, style) {
         el.style.textAlign = align;
     }
     if (style?.font_size) {
-        el.style.fontSize = style.font_size + 'pt';
+        el.style.fontSize = `calc(${style.font_size}pt * var(--doc-zoom, 1))`;
     }
     if (style?.bold === true) {
         el.style.fontWeight = 'bold';
@@ -538,7 +607,7 @@ function renderRun(run, container, doc) {
         span.style.textDecoration = (span.style.textDecoration || '') +
             (span.style.textDecoration ? ' line-through' : 'line-through');
     }
-    if (run.font_size) span.style.fontSize = run.font_size + 'pt';
+    if (run.font_size) span.style.fontSize = `calc(${run.font_size}pt * var(--doc-zoom, 1))`;
     if (run.color && run.color !== 'auto') span.style.color = '#' + run.color;
     if (run.highlight) {
         span.style.backgroundColor = highlightColorMap[run.highlight] || run.highlight;
@@ -741,7 +810,7 @@ function performFind() {
 
     findMatches = [];
     const textNodes = [];
-    const walker = document.createTreeWalker(desk, NodeFilter.SHOW_TEXT);
+    const walker = document.createTreeWalker(deskContent, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
         textNodes.push(walker.currentNode);
     }
