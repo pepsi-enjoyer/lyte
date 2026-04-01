@@ -136,11 +136,11 @@ body {
 
 .status-banner {
     position: fixed;
-    top: 16px;
-    left: 50%;
-    transform: translateX(-50%) translateY(-140%);
+    right: 16px;
+    bottom: 16px;
+    transform: translateY(140%);
     z-index: 900;
-    min-width: min(720px, calc(100vw - 2rem));
+    width: min(420px, calc(100vw - 2rem));
     max-width: calc(100vw - 2rem);
     padding: 0.75rem 1rem;
     border-radius: 10px;
@@ -153,7 +153,7 @@ body {
     transition: transform 0.2s ease, opacity 0.2s ease;
 }
 .status-banner.visible {
-    transform: translateX(-50%) translateY(0);
+    transform: translateY(0);
     opacity: 1;
 }
 .status-banner.status-error {
@@ -343,6 +343,7 @@ body {
 }
 
 .doc-image {
+    width: auto;
     max-width: 100%;
     height: auto;
     display: block;
@@ -560,7 +561,12 @@ body.drag-over::after {
         --doc-page-padding: calc(36px * var(--doc-zoom));
     }
     .comments-panel { width: 250px; min-width: 200px; }
-    .status-banner { min-width: calc(100vw - 1rem); top: 12px; }
+    .status-banner {
+        right: 0.5rem;
+        bottom: 0.5rem;
+        width: calc(100vw - 1rem);
+        max-width: calc(100vw - 1rem);
+    }
 }
 @media (max-width: 600px) {
     .tool-rail {
