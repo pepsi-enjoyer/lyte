@@ -250,6 +250,8 @@ The frontend renders the document in a paginated, print-like layout:
 |----------|--------|
 | Ctrl+O | Open file |
 | Ctrl+F | Find in document |
+| Ctrl++ / Ctrl+- | Zoom document in or out |
+| Ctrl+Mouse Wheel | Zoom document in or out |
 | Ctrl+Q | Quit |
 | Ctrl+D | Toggle dark/light theme |
 | Ctrl+] | Toggle comments panel |
