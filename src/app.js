@@ -25,9 +25,11 @@ const DOC_ZOOM_DEFAULT = 1;
 const DOC_ZOOM_MIN = 0.5;
 const DOC_ZOOM_MAX = 2;
 const DOC_ZOOM_STEP = 0.1;
+const SUPPORTED_SPREADSHEET_EXTENSIONS = ['xlsx', 'xlsm', 'xlsb', 'xls'];
 
 // State
 let currentDocument = null;
+let currentWorkbook = null;
 let currentFilePath = null;
 let commentsVisible = false;
 let findMatches = [];
@@ -108,9 +110,9 @@ async function setupTauriListeners() {
     try {
         await listen('tauri://drag-drop', async (event) => {
             const paths = event.payload?.paths || [];
-            const docxPath = paths.find(p => p.toLowerCase().endsWith('.docx'));
-            if (docxPath) {
-                await loadDocument(docxPath);
+            const filePath = paths.find(isSupportedFilePath);
+            if (filePath) {
+                await loadDocument(filePath);
             }
         });
     } catch (err) {
@@ -136,7 +138,11 @@ async function handleOpenFile() {
     try {
         const selected = await open({
             multiple: false,
-            filters: [{ name: 'Word Documents', extensions: ['docx'] }]
+            filters: [
+                { name: 'Supported Documents', extensions: ['docx', ...SUPPORTED_SPREADSHEET_EXTENSIONS] },
+                { name: 'Word Documents', extensions: ['docx'] },
+                { name: 'Excel Workbooks', extensions: SUPPORTED_SPREADSHEET_EXTENSIONS }
+            ]
         });
         if (selected) {
             const path = selected.path || selected;
@@ -158,10 +164,9 @@ async function loadDocument(path) {
     showStatus('Loading document...', 'loading', 1500);
 
     try {
-        const doc = await invoke('open_docx', { path });
-        currentDocument = doc;
+        const openedFile = await invoke('open_file', { path });
         fileInfo.textContent = '';
-        renderDocument(doc);
+        renderOpenedFile(openedFile);
         void loadRecentFiles();
         showStatus(getFileName(path) + ' opened', 'success', 1800);
     } catch (err) {
@@ -204,7 +209,7 @@ async function openLaunchDocument() {
     if (!invoke) return;
 
     try {
-        const launchPath = await invoke('get_launch_docx_path');
+        const launchPath = await invoke('get_launch_file_path');
         if (typeof launchPath === 'string' && launchPath.trim().length > 0) {
             await loadDocument(launchPath);
         }
@@ -339,13 +344,315 @@ function isZoomOutShortcut(event) {
     return event.key === '-' || event.key === '_' || event.code === 'NumpadSubtract';
 }
 
+// --- File rendering ---
+
+function renderOpenedFile(openedFile) {
+    if (openedFile?.type === 'docx' && openedFile.document) {
+        renderDocument(openedFile.document);
+        return;
+    }
+
+    if (openedFile?.type === 'xlsx' && openedFile.workbook) {
+        renderWorkbook(openedFile.workbook);
+        return;
+    }
+
+    showError('Unsupported file response from Hermes.');
+}
+
+function renderWorkbook(workbook) {
+    currentDocument = null;
+    currentWorkbook = workbook;
+    welcomeScreen.style.display = 'none';
+    documentView.style.display = 'flex';
+    deskContent.replaceChildren();
+    deskContent.classList.add('spreadsheet-content');
+    commentsVisible = false;
+    commentsPanel.style.display = 'none';
+    renderComments([]);
+    closeFindBar();
+
+    const sheet = workbook.active_sheet;
+    const container = document.createElement('section');
+    container.className = 'spreadsheet-view';
+
+    container.appendChild(renderWorkbookHeader(workbook, sheet));
+    container.appendChild(renderSheetTabs(workbook));
+    container.appendChild(sheet ? renderSheetGrid(sheet, workbook.limits) : renderEmptySheetState());
+
+    deskContent.appendChild(container);
+
+    const filename = getFileName(currentFilePath) || 'Hermes';
+    document.title = filename + ' - Hermes';
+}
+
+function renderWorkbookHeader(workbook, sheet) {
+    const header = document.createElement('div');
+    header.className = 'spreadsheet-header';
+
+    const title = document.createElement('div');
+    title.className = 'spreadsheet-title';
+    title.textContent = getFileName(currentFilePath) || 'Workbook';
+
+    const meta = document.createElement('div');
+    meta.className = 'spreadsheet-meta';
+    const sheetCount = workbook.sheets?.length || 0;
+    const rowCount = sheet?.row_count || 0;
+    const columnCount = sheet?.column_count || 0;
+    meta.textContent = `${sheetCount} sheet${sheetCount === 1 ? '' : 's'} · ${rowCount} row${rowCount === 1 ? '' : 's'} · ${columnCount} column${columnCount === 1 ? '' : 's'}`;
+
+    header.appendChild(title);
+    header.appendChild(meta);
+
+    if (sheet?.truncated && sheet.truncated_reasons?.length) {
+        const notice = document.createElement('div');
+        notice.className = 'spreadsheet-truncation';
+        notice.textContent = sheet.truncated_reasons.join(' ');
+        header.appendChild(notice);
+    }
+
+    return header;
+}
+
+function renderSheetTabs(workbook) {
+    const tabs = document.createElement('div');
+    tabs.className = 'sheet-tabs';
+
+    for (const sheet of workbook.sheets || []) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'sheet-tab';
+        if (sheet.index === workbook.active_sheet_index) {
+            button.classList.add('active');
+        }
+        if (!sheet.visible) {
+            button.classList.add('hidden-sheet');
+        }
+        button.dataset.sheetIndex = String(sheet.index);
+        button.textContent = sheet.name;
+        button.addEventListener('click', () => {
+            if (sheet.index !== currentWorkbook?.active_sheet_index) {
+                void loadWorkbookSheet(sheet.index);
+            }
+        });
+        tabs.appendChild(button);
+    }
+
+    return tabs;
+}
+
+async function loadWorkbookSheet(sheetIndex) {
+    if (!invoke || !currentWorkbook || !currentFilePath) return;
+
+    showStatus('Loading sheet...', 'loading', 1500);
+
+    try {
+        const sheet = await invoke('open_xlsx_sheet', { path: currentFilePath, sheetIndex });
+        currentWorkbook.active_sheet_index = sheet.index;
+        currentWorkbook.active_sheet = sheet;
+        renderWorkbook(currentWorkbook);
+        showStatus(sheet.name + ' loaded', 'success', 1200);
+    } catch (err) {
+        showError(err);
+    }
+}
+
+function renderSheetGrid(sheet, limits = {}) {
+    if (!sheet.rows || sheet.rows.length === 0) {
+        return renderEmptySheetState();
+    }
+
+    const maxColumns = limits.max_columns || 200;
+    const observedColumns = Math.max(1, ...sheet.rows.flatMap(row => (row.cells || []).map(cell => cell.column || 1)));
+    const displayColumnCount = Math.max(1, Math.min(observedColumns, maxColumns));
+    const maxGridCells = 60000;
+    const displayRowCount = Math.max(1, Math.floor(maxGridCells / displayColumnCount));
+    const displayRows = sheet.rows.slice(0, displayRowCount);
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'spreadsheet-grid-wrap';
+
+    if (displayRows.length < sheet.rows.length) {
+        const notice = document.createElement('div');
+        notice.className = 'spreadsheet-truncation';
+        notice.textContent = `Showing ${displayRows.length} of ${sheet.rows.length} loaded rows to keep rendering fast.`;
+        wrapper.appendChild(notice);
+    }
+
+    const gridLayer = document.createElement('div');
+    gridLayer.className = 'spreadsheet-grid-layer';
+
+    const table = document.createElement('table');
+    table.className = 'spreadsheet-grid';
+
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    const corner = document.createElement('th');
+    corner.className = 'sheet-corner';
+    headerRow.appendChild(corner);
+    for (let column = 1; column <= displayColumnCount; column++) {
+        const th = document.createElement('th');
+        th.scope = 'col';
+        th.textContent = columnName(column);
+        headerRow.appendChild(th);
+    }
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    for (const row of displayRows) {
+        const tr = document.createElement('tr');
+        tr.dataset.rowIndex = String(row.index);
+        const rowHeader = document.createElement('th');
+        rowHeader.scope = 'row';
+        rowHeader.textContent = row.index;
+        tr.appendChild(rowHeader);
+
+        const cellsByColumn = new Map((row.cells || []).map(cell => [cell.column, cell]));
+        for (let column = 1; column <= displayColumnCount; column++) {
+            const td = document.createElement('td');
+            const cell = cellsByColumn.get(column);
+            if (cell) {
+                td.textContent = cell.value || '';
+                td.dataset.reference = cell.reference;
+                td.classList.add('xlsx-cell-' + cell.value_type);
+                if (cell.formula) {
+                    td.title = '=' + cell.formula;
+                    td.classList.add('xlsx-cell-formula');
+                }
+            }
+            tr.appendChild(td);
+        }
+
+        tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    gridLayer.appendChild(table);
+
+    const images = sheet.images || [];
+    if (images.length) {
+        const imagesLayer = document.createElement('div');
+        imagesLayer.className = 'spreadsheet-grid-images';
+        gridLayer.appendChild(imagesLayer);
+        // Positions depend on the rendered cell geometry, so defer until the
+        // grid has been laid out in the DOM.
+        requestAnimationFrame(() => {
+            positionSheetImages(table, imagesLayer, images, displayColumnCount);
+        });
+    }
+
+    wrapper.appendChild(gridLayer);
+
+    return wrapper;
+}
+
+const EMU_PER_PIXEL = 9525;
+
+// Overlays each worksheet picture on the grid, translating its
+// SpreadsheetDrawingML anchor (zero-based cell indices + EMU offsets) into
+// pixel coordinates measured from the rendered table.
+function positionSheetImages(table, imagesLayer, images, displayColumnCount) {
+    const headerCells = table.tHead?.rows?.[0]?.cells;
+    const bodyRows = table.tBodies?.[0]?.rows;
+    if (!headerCells || !bodyRows || !bodyRows.length) {
+        return;
+    }
+
+    // Column left edge for a 1-based column index (extrapolating past the last
+    // rendered column with its width).
+    const columnLeft = (column) => {
+        if (column <= 1) {
+            return headerCells[1]?.offsetLeft || 0;
+        }
+        if (column <= displayColumnCount) {
+            return headerCells[column].offsetLeft;
+        }
+        const last = headerCells[displayColumnCount];
+        return last.offsetLeft + last.offsetWidth * (column - displayColumnCount);
+    };
+
+    const rowGeometry = new Map();
+    for (const tr of bodyRows) {
+        const index = Number(tr.dataset.rowIndex);
+        if (!Number.isNaN(index)) {
+            rowGeometry.set(index, { top: tr.offsetTop, height: tr.offsetHeight });
+        }
+    }
+    const renderedIndexes = [...rowGeometry.keys()].sort((a, b) => a - b);
+    const defaultRowHeight = bodyRows[0].offsetHeight || 28;
+
+    // Top edge for a 1-based row index. Rows with no data are not rendered, so
+    // gaps are estimated with the default row height.
+    const rowTop = (rowIndex) => {
+        const exact = rowGeometry.get(rowIndex);
+        if (exact) {
+            return exact.top;
+        }
+        let previous = null;
+        for (const index of renderedIndexes) {
+            if (index <= rowIndex) previous = index;
+            else break;
+        }
+        if (previous !== null) {
+            const info = rowGeometry.get(previous);
+            return info.top + info.height + (rowIndex - previous - 1) * defaultRowHeight;
+        }
+        if (renderedIndexes.length) {
+            const first = renderedIndexes[0];
+            return rowGeometry.get(first).top - (first - rowIndex) * defaultRowHeight;
+        }
+        return (rowIndex - 1) * defaultRowHeight;
+    };
+
+    for (const image of images) {
+        if (!image.data_uri) continue;
+
+        const left = columnLeft(image.from_col + 1) + (image.from_col_off || 0) / EMU_PER_PIXEL;
+        const top = rowTop(image.from_row + 1) + (image.from_row_off || 0) / EMU_PER_PIXEL;
+
+        let width;
+        let height;
+        if (image.anchor_type === 'two' && image.to_col != null && image.to_row != null) {
+            const right = columnLeft(image.to_col + 1) + (image.to_col_off || 0) / EMU_PER_PIXEL;
+            const bottom = rowTop(image.to_row + 1) + (image.to_row_off || 0) / EMU_PER_PIXEL;
+            width = Math.max(0, right - left);
+            height = Math.max(0, bottom - top);
+        } else if (image.ext_cx && image.ext_cy) {
+            width = image.ext_cx / EMU_PER_PIXEL;
+            height = image.ext_cy / EMU_PER_PIXEL;
+        }
+
+        const img = document.createElement('img');
+        img.className = 'spreadsheet-image';
+        img.src = image.data_uri;
+        img.alt = '';
+        img.style.left = `${left}px`;
+        img.style.top = `${top}px`;
+        if (width) img.style.width = `${width}px`;
+        if (height) img.style.height = `${height}px`;
+        imagesLayer.appendChild(img);
+    }
+}
+
+function renderEmptySheetState() {
+    const empty = document.createElement('div');
+    empty.className = 'spreadsheet-empty';
+    empty.innerHTML = `
+        <h2>This sheet is empty</h2>
+        <p>Hermes opened the workbook, but this sheet has no visible preview cells.</p>
+    `;
+    return empty;
+}
+
 // --- Document rendering ---
 
 function renderDocument(doc) {
     currentDocument = doc;
+    currentWorkbook = null;
     welcomeScreen.style.display = 'none';
     documentView.style.display = 'flex';
     deskContent.replaceChildren();
+    deskContent.classList.remove('spreadsheet-content');
     commentsVisible = false;
     commentsPanel.style.display = 'none';
     closeFindBar();
@@ -1044,4 +1351,21 @@ function formatDate(dateStr) {
 
 function getFileName(path) {
     return path ? path.split(/[\\/]/).pop() : '';
+}
+
+function isSupportedFilePath(path) {
+    if (typeof path !== 'string') return false;
+    const lower = path.toLowerCase();
+    return lower.endsWith('.docx') || SUPPORTED_SPREADSHEET_EXTENSIONS.some((ext) => lower.endsWith('.' + ext));
+}
+
+function columnName(index) {
+    let name = '';
+    let current = index;
+    while (current > 0) {
+        current -= 1;
+        name = String.fromCharCode(65 + (current % 26)) + name;
+        current = Math.floor(current / 26);
+    }
+    return name;
 }

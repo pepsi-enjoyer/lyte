@@ -1,14 +1,15 @@
 # Hermes - Specification
 
-> A lightweight, Rust-powered DOCX viewer. Messenger of the gods -- delivers the document to you, fast and light.
+> A lightweight, Rust-powered DOCX and XLSX viewer. Messenger of the gods -- delivers the document to you, fast and light.
 
 ## 1. Overview
 
-Hermes is a read-only DOCX viewer built with Rust and Tauri 2.0. It replaces the need to open Microsoft Word when you just want to read a document. The app is fast, minimal, and cross-platform (Windows, macOS, Linux).
+Hermes is a read-only DOCX and XLSX viewer built with Rust and Tauri 2.0. It replaces the need to open Microsoft Word or Excel when you just want to read a document or quickly inspect a workbook. The app is fast, minimal, and cross-platform (Windows, macOS, Linux).
 
 ### Goals
 
 - Open and render .docx files with good fidelity
+- Open .xlsx files quickly as a spreadsheet grid preview
 - Read-only -- no editing
 - Lightweight binary (~3-5MB) with low memory footprint
 - Fast startup and document load times
@@ -16,10 +17,11 @@ Hermes is a read-only DOCX viewer built with Rust and Tauri 2.0. It replaces the
 
 ### Non-Goals
 
-- Editing or saving DOCX files
+- Editing or saving DOCX or XLSX files
 - 100% OOXML spec compliance (the spec is 6,000+ pages)
 - Rendering macros, form fields, or embedded OLE objects
 - Automatic line-overflow pagination (explicit page breaks only)
+- Evaluating XLSX formulas or rendering charts, pivot tables, macros, embedded objects, or full Excel-compatible layout
 
 ## 2. Architecture
 
@@ -28,7 +30,8 @@ Hermes is a read-only DOCX viewer built with Rust and Tauri 2.0. It replaces the
 |   Rust Backend    | <--------------------> |   Web Frontend     |
 |   (src-tauri/)    |                        |   (src/)           |
 |                   |                        |                    |
-| - DOCX parser     |  invoke('open_docx')   | - Document renderer|
+| - DOCX parser     |  invoke('open_file')   | - Document renderer|
+| - XLSX parser     | ------------------>    | - Spreadsheet grid |
 | - ZIP extraction   | ------------------>   | - Comment panel    |
 | - XML parsing      |  <-- DocumentModel    | - Page layout CSS  |
 | - Image extraction  |      as JSON          | - File open UI     |
@@ -36,7 +39,7 @@ Hermes is a read-only DOCX viewer built with Rust and Tauri 2.0. It replaces the
 +-------------------+                        +--------------------+
 ```
 
-**Tauri 2.0** provides the app shell. The Rust backend parses DOCX files and sends a structured document model as JSON to the web frontend via Tauri's IPC invoke mechanism. The frontend renders the model as styled HTML in the system webview.
+**Tauri 2.0** provides the app shell. The Rust backend parses DOCX and XLSX files and sends a tagged structured model as JSON to the web frontend via Tauri's IPC invoke mechanism. The frontend renders the model as styled HTML in the system webview.
 
 ## 3. Tech Stack
 
@@ -44,6 +47,7 @@ Hermes is a read-only DOCX viewer built with Rust and Tauri 2.0. It replaces the
 |-----------|-----------|-----------|
 | App shell | Tauri 2.0 | Lightweight native app with system webview |
 | DOCX parsing | `zip` + `quick-xml` | Direct control over OOXML parsing; `docx-rust` is generation-focused |
+| XLSX parsing | `zip` + `quick-xml` | Direct control over a fast workbook preview path |
 | Image encoding | `base64` | Embed images as data URIs in HTML |
 | Serialization | `serde` + `serde_json` | Rust-to-JS document model transfer |
 | Frontend | Vanilla HTML/CSS/JS | No framework, no build step, minimal footprint |
@@ -147,6 +151,45 @@ struct Style {
 }
 ```
 
+### XLSX Preview Types
+
+The Rust backend parses XLSX into a sparse workbook preview model, serialized as tagged JSON for the frontend.
+
+```rust
+struct XlsxWorkbook {
+    sheets: Vec<XlsxSheetSummary>,
+    active_sheet_index: usize,
+    active_sheet: Option<XlsxSheet>,
+    limits: XlsxPreviewLimits,
+}
+
+struct XlsxSheet {
+    index: usize,
+    name: String,
+    rows: Vec<XlsxRow>,
+    row_count: u32,
+    column_count: u32,
+    max_row: u32,
+    max_column: u32,
+    truncated: bool,
+    truncated_reasons: Vec<String>,
+}
+
+struct XlsxCell {
+    reference: String,
+    row: u32,
+    column: u32,
+    value: String,
+    raw_value: Option<String>,
+    value_type: XlsxCellValueType,
+    formula: Option<String>,
+    style_index: Option<u32>,
+    number_format: Option<String>,
+}
+```
+
+The preview model includes visible cell values, shared strings, inline strings, numbers, booleans, dates, formulas with cached values, and basic number/date/text formats.
+
 ## 5. DOCX Parsing Details
 
 ### 5.1 ZIP Extraction
@@ -240,9 +283,9 @@ The frontend renders the document in a paginated, print-like layout:
 
 ### 7.1 File Opening
 
-- Native file dialog (Tauri dialog plugin), filtered to `.docx`
-- Drag-and-drop a `.docx` file onto the window
-- Double-click `.docx` files (via OS file association, future enhancement)
+- Native file dialog (Tauri dialog plugin), filtered to `.docx` and `.xlsx`
+- Drag-and-drop a `.docx` or `.xlsx` file onto the window
+- Double-click `.docx` or `.xlsx` files (via OS file association, future enhancement)
 
 ### 7.2 Keyboard Shortcuts
 
@@ -262,9 +305,10 @@ Store a list of recently opened files in Tauri app data. Show in a dropdown or o
 
 ### 7.4 Error Handling
 
-- Malformed or unsupported DOCX: show a user-friendly error message, not a crash
+- Malformed or unsupported DOCX/XLSX: show a user-friendly error message, not a crash
 - Unsupported elements (macros, OLE objects): silently skip, render what we can
 - Empty document: show a "This document is empty" message
+- Empty worksheet: show a "This sheet is empty" message
 
 ## 8. Known Limitations
 
@@ -277,6 +321,9 @@ Store a list of recently opened files in Tauri app data. Show in a dropdown or o
 | Macros | Not supported. Ignored. |
 | Track changes | Not rendered. The document shows its current accepted state. |
 | Large documents | 100+ page documents with many images may be slow. Lazy loading is a future optimization. |
+| XLSX formula evaluation | Not supported. Cached formula values are displayed when present. |
+| XLSX charts and pivots | Not supported. Workbook preview focuses on visible sheet cells. |
+| XLSX layout fidelity | Merged cells, frozen panes, filters, drawings, embedded objects, and full Excel-compatible layout are not part of the fast preview path. |
 
 ## 9. Implementation Phases
 
@@ -293,10 +340,18 @@ Store a list of recently opened files in Tauri app data. Show in a dropdown or o
 - Header/footer/footnote parser
 - Style parser and inheritance resolver
 
+### Phase 2b: XLSX Parsing
+- Workbook parser: ZIP validation, workbook sheets, relationships
+- Shared string parser: stream only strings referenced by preview cells
+- Style parser: basic number, date, percentage, and text formats
+- Worksheet parser: sparse rows and cells with row, column, and cell limits
+- Sheet loading command for loading non-active sheets on demand
+
 ### Phase 3: Frontend Rendering
 - HTML document renderer (paragraphs, runs, tables, images, page breaks)
 - Comment display panel with cross-linking
 - Header/footer/footnote rendering
+- Spreadsheet renderer (sheet tabs, sticky row/column headers, sparse grid preview, truncation notices)
 
 ### Phase 4: Polish
 - Dark/light theme

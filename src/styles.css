@@ -377,6 +377,185 @@ body {
     vertical-align: top;
 }
 
+/* Spreadsheet preview */
+.spreadsheet-content {
+    align-items: stretch;
+    width: 100%;
+}
+
+.spreadsheet-view {
+    width: 100%;
+    min-width: 720px;
+    background: var(--surface-bg);
+    color: var(--text);
+}
+
+.spreadsheet-header {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-bg);
+}
+
+.spreadsheet-title {
+    font-weight: 700;
+    font-size: 1.05rem;
+    margin-bottom: 0.25rem;
+}
+
+.spreadsheet-meta {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.spreadsheet-truncation {
+    margin-top: 0.75rem;
+    padding: 0.65rem 0.8rem;
+    border: 1px solid #d6b25e;
+    border-radius: 8px;
+    background: #fff8df;
+    color: #6f5200;
+    font-size: 0.85rem;
+}
+
+.sheet-tabs {
+    display: flex;
+    gap: 0.35rem;
+    padding: 0.65rem 0.75rem 0;
+    overflow-x: auto;
+    background: var(--panel-bg);
+    border-bottom: 1px solid var(--border);
+}
+
+.sheet-tab {
+    border: 1px solid var(--border);
+    border-bottom: none;
+    background: var(--surface-bg);
+    color: var(--text-muted);
+    padding: 0.55rem 0.9rem;
+    border-radius: 8px 8px 0 0;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.sheet-tab.active {
+    color: var(--text);
+    font-weight: 700;
+    border-color: var(--link-color);
+}
+
+.sheet-tab.hidden-sheet {
+    opacity: 0.65;
+    font-style: italic;
+}
+
+.spreadsheet-grid-wrap {
+    width: 100%;
+    overflow: auto;
+    max-height: calc(100vh - 220px);
+    background: var(--surface-bg);
+}
+
+.spreadsheet-grid-layer {
+    position: relative;
+    width: max-content;
+    min-width: 100%;
+}
+
+.spreadsheet-grid-images {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+}
+
+.spreadsheet-grid-images .spreadsheet-image {
+    position: absolute;
+    object-fit: contain;
+    /* Excel renders pictures above the cells, with no border. */
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+
+.spreadsheet-grid {
+    border-collapse: separate;
+    border-spacing: 0;
+    width: max-content;
+    min-width: 100%;
+    font-size: 0.9rem;
+}
+
+.spreadsheet-grid th,
+.spreadsheet-grid td {
+    min-width: 96px;
+    max-width: 280px;
+    height: 28px;
+    padding: 0.25rem 0.5rem;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.spreadsheet-grid thead th,
+.spreadsheet-grid tbody th {
+    position: sticky;
+    background: var(--panel-bg);
+    color: var(--text-muted);
+    font-weight: 600;
+    text-align: center;
+    z-index: 2;
+}
+
+.spreadsheet-grid thead th {
+    top: 0;
+}
+
+.spreadsheet-grid tbody th,
+.spreadsheet-grid .sheet-corner {
+    left: 0;
+    min-width: 54px;
+    width: 54px;
+    z-index: 3;
+}
+
+.spreadsheet-grid .sheet-corner {
+    top: 0;
+    z-index: 4;
+}
+
+.spreadsheet-grid td {
+    background: var(--surface-bg);
+    color: var(--text);
+}
+
+.spreadsheet-grid td.xlsx-cell-number,
+.spreadsheet-grid td.xlsx-cell-date,
+.spreadsheet-grid td.xlsx-cell-boolean {
+    text-align: right;
+}
+
+.spreadsheet-grid td.xlsx-cell-formula {
+    box-shadow: inset 3px 0 0 var(--link-color);
+}
+
+.spreadsheet-empty {
+    margin: 2rem;
+    padding: 2rem;
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.spreadsheet-empty h2 {
+    color: var(--text);
+    font-size: 1.15rem;
+    margin-bottom: 0.4rem;
+}
+
 .commented-text {
     background-color: var(--comment-highlight);
     cursor: pointer;
@@ -501,7 +680,7 @@ mark.find-highlight.current { background: #ff8c00; color: #fff; }
 
 /* Drag and drop overlay */
 body.drag-over::after {
-    content: 'Drop .docx file here';
+    content: 'Drop .docx or Excel file here';
     position: fixed;
     inset: 0;
     background: rgba(102,126,234,0.85);
@@ -548,6 +727,11 @@ body.drag-over::after {
 }
 :is(html, body).dark-theme .doc-empty-state {
     background: rgba(0,0,0,0.03);
+}
+:is(html, body).dark-theme .spreadsheet-truncation {
+    background: rgba(120, 88, 10, 0.25);
+    color: #f2d27c;
+    border-color: #8d6f21;
 }
 
 /* Responsive */

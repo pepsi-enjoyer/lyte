@@ -166,13 +166,16 @@ impl DocxParser {
 
                         b"w:hyperlink" => {
                             hyperlink_url = get_attr(e, b"r:id").and_then(|id| {
-                                self.relationships.iter()
+                                self.relationships
+                                    .iter()
                                     .find(|r| r.id == id)
                                     .map(|r| r.target.clone())
                             });
                         }
 
-                        b"w:numPr" => { in_num_pr = true; }
+                        b"w:numPr" => {
+                            in_num_pr = true;
+                        }
                         b"w:ilvl" if in_num_pr => {
                             if let Some(ctx) = para_stack.last_mut() {
                                 ctx.ilvl = get_attr(e, b"w:val").and_then(|v| v.parse().ok());
@@ -372,8 +375,12 @@ impl DocxParser {
                             }
                         }
 
-                        b"w:hyperlink" => { hyperlink_url = None; }
-                        b"w:numPr" => { in_num_pr = false; }
+                        b"w:hyperlink" => {
+                            hyperlink_url = None;
+                        }
+                        b"w:numPr" => {
+                            in_num_pr = false;
+                        }
 
                         b"w:p" => {
                             if let Some(pctx) = para_stack.pop() {
@@ -382,7 +389,9 @@ impl DocxParser {
                                 // Compute list info
                                 let (list_level, list_format) = match (pctx.num_id, pctx.ilvl) {
                                     (Some(num_id), Some(ilvl)) if num_id > 0 => {
-                                        if let Some(info) = self.numbering_levels.get(&(num_id, ilvl)) {
+                                        if let Some(info) =
+                                            self.numbering_levels.get(&(num_id, ilvl))
+                                        {
                                             let counter = list_counters
                                                 .entry((num_id, ilvl))
                                                 .or_insert(info.start.saturating_sub(1));
@@ -475,7 +484,9 @@ impl DocxParser {
                             // Check if it's a heading style
                             if let Some(ref id) = current_style_id {
                                 if id.starts_with("Heading") || id.starts_with("heading") {
-                                    if let Some(level) = id.chars().last().and_then(|c| c.to_digit(10)) {
+                                    if let Some(level) =
+                                        id.chars().last().and_then(|c| c.to_digit(10))
+                                    {
                                         if level >= 1 && level <= 6 {
                                             current_style.heading_level = Some(level as u8);
                                         }
@@ -487,7 +498,10 @@ impl DocxParser {
                             if let Some(val) = get_attr(e, b"w:val") {
                                 let lower = val.to_lowercase();
                                 if lower.starts_with("heading ") {
-                                    if let Some(level) = lower.strip_prefix("heading ").and_then(|s| s.parse::<u8>().ok()) {
+                                    if let Some(level) = lower
+                                        .strip_prefix("heading ")
+                                        .and_then(|s| s.parse::<u8>().ok())
+                                    {
                                         if level >= 1 && level <= 6 {
                                             current_style.heading_level = Some(level);
                                         }
@@ -978,52 +992,49 @@ impl DocxParser {
 
         loop {
             match reader.read_event_into(&mut buf) {
-                Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                    match e.name().as_ref() {
-                        b"w:abstractNum" => {
-                            cur_abstract_id =
-                                get_attr(e, b"w:abstractNumId").and_then(|v| v.parse().ok());
-                        }
-                        b"w:lvl" if cur_abstract_id.is_some() => {
-                            cur_lvl_ilvl = get_attr(e, b"w:ilvl").and_then(|v| v.parse().ok());
-                            lvl_num_fmt.clear();
-                            lvl_text.clear();
-                            lvl_start = 1;
-                        }
-                        b"w:start" if cur_lvl_ilvl.is_some() => {
-                            if let Some(v) = get_attr(e, b"w:val") {
-                                lvl_start = v.parse().unwrap_or(1);
-                            }
-                        }
-                        b"w:numFmt" if cur_lvl_ilvl.is_some() => {
-                            if let Some(v) = get_attr(e, b"w:val") {
-                                lvl_num_fmt = v;
-                            }
-                        }
-                        b"w:lvlText" if cur_lvl_ilvl.is_some() => {
-                            if let Some(v) = get_attr(e, b"w:val") {
-                                lvl_text = v;
-                            }
-                        }
-                        b"w:num" => {
-                            in_num = true;
-                            cur_num_id = get_attr(e, b"w:numId").and_then(|v| v.parse().ok());
-                        }
-                        b"w:abstractNumId" if in_num => {
-                            if let (Some(num_id), Some(abs_id)) = (
-                                cur_num_id,
-                                get_attr(e, b"w:val").and_then(|v| v.parse().ok()),
-                            ) {
-                                num_to_abstract.insert(num_id, abs_id);
-                            }
-                        }
-                        _ => {}
+                Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => match e.name().as_ref() {
+                    b"w:abstractNum" => {
+                        cur_abstract_id =
+                            get_attr(e, b"w:abstractNumId").and_then(|v| v.parse().ok());
                     }
-                }
+                    b"w:lvl" if cur_abstract_id.is_some() => {
+                        cur_lvl_ilvl = get_attr(e, b"w:ilvl").and_then(|v| v.parse().ok());
+                        lvl_num_fmt.clear();
+                        lvl_text.clear();
+                        lvl_start = 1;
+                    }
+                    b"w:start" if cur_lvl_ilvl.is_some() => {
+                        if let Some(v) = get_attr(e, b"w:val") {
+                            lvl_start = v.parse().unwrap_or(1);
+                        }
+                    }
+                    b"w:numFmt" if cur_lvl_ilvl.is_some() => {
+                        if let Some(v) = get_attr(e, b"w:val") {
+                            lvl_num_fmt = v;
+                        }
+                    }
+                    b"w:lvlText" if cur_lvl_ilvl.is_some() => {
+                        if let Some(v) = get_attr(e, b"w:val") {
+                            lvl_text = v;
+                        }
+                    }
+                    b"w:num" => {
+                        in_num = true;
+                        cur_num_id = get_attr(e, b"w:numId").and_then(|v| v.parse().ok());
+                    }
+                    b"w:abstractNumId" if in_num => {
+                        if let (Some(num_id), Some(abs_id)) = (
+                            cur_num_id,
+                            get_attr(e, b"w:val").and_then(|v| v.parse().ok()),
+                        ) {
+                            num_to_abstract.insert(num_id, abs_id);
+                        }
+                    }
+                    _ => {}
+                },
                 Ok(Event::End(ref e)) => match e.name().as_ref() {
                     b"w:lvl" => {
-                        if let (Some(abs_id), Some(ilvl)) = (cur_abstract_id, cur_lvl_ilvl.take())
-                        {
+                        if let (Some(abs_id), Some(ilvl)) = (cur_abstract_id, cur_lvl_ilvl.take()) {
                             abstract_nums.entry(abs_id).or_default().push((
                                 ilvl,
                                 NumberingLevelInfo {
@@ -1137,7 +1148,8 @@ impl DocxParser {
                     }
                     b"w:hyperlink" if in_para => {
                         hyperlink_url = get_attr(e, b"r:id").and_then(|id| {
-                            self.relationships.iter()
+                            self.relationships
+                                .iter()
                                 .find(|r| r.id == id)
                                 .map(|r| r.target.clone())
                         });
@@ -1198,7 +1210,9 @@ impl DocxParser {
                 }
                 Ok(Event::End(ref e)) => match e.name().as_ref() {
                     b"w:t" => in_text = false,
-                    b"w:hyperlink" => { hyperlink_url = None; }
+                    b"w:hyperlink" => {
+                        hyperlink_url = None;
+                    }
                     b"w:r" => {
                         in_run = false;
                         let finished_run = std::mem::replace(&mut run_ctx, RunCtx::new());
@@ -1279,7 +1293,11 @@ impl ParagraphCtx {
         }
     }
 
-    fn into_block_element(self, list_level: Option<u8>, list_format: Option<String>) -> BlockElement {
+    fn into_block_element(
+        self,
+        list_level: Option<u8>,
+        list_format: Option<String>,
+    ) -> BlockElement {
         BlockElement::Paragraph {
             runs: self.runs,
             style: self.style,
@@ -1486,11 +1504,9 @@ mod tests {
 
     #[test]
     fn test_parse_preserves_trailing_spaces_and_font_family() {
-        let docx_path = write_test_docx(
-            &[
-                (
-                    "word/document.xml",
-                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        let docx_path = write_test_docx(&[(
+            "word/document.xml",
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:body>
     <w:p>
@@ -1506,9 +1522,7 @@ mod tests {
     </w:p>
   </w:body>
 </w:document>"#,
-                ),
-            ],
-        );
+        )]);
 
         let mut parser = DocxParser::from_path(docx_path.to_str().unwrap()).expect("parser init");
         let document = parser.parse().expect("parse document");
@@ -1530,20 +1544,19 @@ mod tests {
 
     #[test]
     fn test_parse_comment_threads_from_comments_extended() {
-        let docx_path = write_test_docx(
-            &[
-                (
-                    "word/document.xml",
-                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        let docx_path = write_test_docx(&[
+            (
+                "word/document.xml",
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:body>
     <w:p><w:r><w:t>Threaded comments</w:t></w:r></w:p>
   </w:body>
 </w:document>"#,
-                ),
-                (
-                    "word/comments.xml",
-                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            ),
+            (
+                "word/comments.xml",
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
             xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml">
   <w:comment w:id="0" w:author="Alice" w15:paraId="11111111">
@@ -1556,18 +1569,17 @@ mod tests {
     <w:p><w:r><w:t>Nested reply</w:t></w:r></w:p>
   </w:comment>
 </w:comments>"#,
-                ),
-                (
-                    "word/commentsExtended.xml",
-                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            ),
+            (
+                "word/commentsExtended.xml",
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w15:commentsEx xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml">
   <w15:commentEx w15:paraId="11111111"/>
   <w15:commentEx w15:paraId="22222222" w15:paraIdParent="11111111"/>
   <w15:commentEx w15:paraId="33333333" w15:paraIdParent="22222222"/>
 </w15:commentsEx>"#,
-                ),
-            ],
-        );
+            ),
+        ]);
 
         let mut parser = DocxParser::from_path(docx_path.to_str().unwrap()).expect("parser init");
         let document = parser.parse().expect("parse document");
@@ -1603,10 +1615,8 @@ mod tests {
         let options: FileOptions<'_, ()> = FileOptions::default();
 
         for &(file_name, content) in files {
-            zip.start_file(file_name, options)
-                .expect("start zip file");
-            zip.write_all(content.as_bytes())
-                .expect("write zip file");
+            zip.start_file(file_name, options).expect("start zip file");
+            zip.write_all(content.as_bytes()).expect("write zip file");
         }
         zip.finish().expect("finish docx");
 

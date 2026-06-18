@@ -58,21 +58,21 @@ pub struct Run {
     #[serde(default, skip_serializing_if = "is_false")]
     pub strikethrough: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub font_size: Option<f32>,        // in pt
+    pub font_size: Option<f32>, // in pt
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_family: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub color: Option<String>,         // hex
+    pub color: Option<String>, // hex
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub highlight: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub comment_ref: Option<u32>,      // links to Comment.id
+    pub comment_ref: Option<u32>, // links to Comment.id
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub footnote_ref: Option<u32>,     // links to Footnote.id
+    pub footnote_ref: Option<u32>, // links to Footnote.id
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub image_id: Option<String>,      // links to images map
+    pub image_id: Option<String>, // links to images map
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub link_url: Option<String>,      // hyperlink URL
+    pub link_url: Option<String>, // hyperlink URL
 }
 
 /// A row in a table
@@ -184,12 +184,7 @@ impl Run {
     }
 
     /// Creates a text run with basic formatting
-    pub fn with_formatting(
-        text: String,
-        bold: bool,
-        italic: bool,
-        underline: bool,
-    ) -> Self {
+    pub fn with_formatting(text: String, bold: bool, italic: bool, underline: bool) -> Self {
         Self {
             text,
             bold,

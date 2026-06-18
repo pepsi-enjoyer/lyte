@@ -2,12 +2,12 @@
 
 ## Overview
 
-Hermes is a read-only DOCX viewer built as a Tauri desktop app with a Rust parsing backend and a vanilla HTML/CSS/JS frontend. The main runtime path is:
+Hermes is a read-only DOCX and XLSX viewer built as a Tauri desktop app with a Rust parsing backend and a vanilla HTML/CSS/JS frontend. The main runtime path is:
 
-1. the frontend asks the Tauri backend to open a `.docx`
-2. the Rust backend parses the DOCX archive into a structured `Document`
-3. the `Document` is serialized to JSON and returned over Tauri IPC
-4. the frontend renders that model into a paginated reading UI
+1. the frontend asks the Tauri backend to open a supported file
+2. the Rust backend detects DOCX or XLSX and parses the OOXML ZIP package into a structured model
+3. a tagged payload is serialized to JSON and returned over Tauri IPC
+4. the frontend routes the payload to either the paginated DOCX renderer or spreadsheet grid renderer
 
 The shipping desktop app uses the code under `src-tauri/`. The repository also contains a shared Rust crate at the repo root for parsing experiments and reusable types.
 
@@ -22,7 +22,7 @@ The shipping desktop app uses the code under `src-tauri/`. The repository also c
 - `src-rust/`
   Shared parser library and demo binary in the root crate.
 - `src-tauri/`
-  Tauri desktop app crate, commands, parser, and document model.
+  Tauri desktop app crate, commands, DOCX/XLSX parsers, and file models.
 - `Cargo.toml`
   Root crate manifest.
 - `config.yaml`
@@ -32,7 +32,7 @@ The shipping desktop app uses the code under `src-tauri/`. The repository also c
 
 - Rust for parsing, data modeling, and desktop app logic
 - Tauri 2 for the desktop shell
-- `zip` and `quick-xml` for DOCX archive and OOXML parsing
+- `zip` and `quick-xml` for OOXML archive and XML parsing
 - `serde` and `serde_json` for document model serialization
 - vanilla HTML, CSS, and JavaScript for the frontend
 
@@ -41,11 +41,15 @@ The shipping desktop app uses the code under `src-tauri/`. The repository also c
 ```mermaid
 flowchart LR
     U["User"] --> F["Frontend UI<br/>src/index.html + src/app.js + src/styles.css"]
-    F -->|"open_docx IPC"| T["Tauri Commands<br/>src-tauri/src/main.rs"]
+    F -->|"open_file IPC"| T["Tauri Commands<br/>src-tauri/src/main.rs"]
     T --> P["DOCX Parser<br/>src-tauri/src/parser.rs"]
+    T --> X["XLSX Parser<br/>src-tauri/src/xlsx_parser.rs"]
     P --> Z["ZIP + OOXML Parts"]
+    X --> Z
     P --> M["Document Model<br/>src-tauri/src/model.rs"]
-    M -->|JSON over IPC| F
+    X --> W["Workbook Model<br/>src-tauri/src/xlsx_model.rs"]
+    M -->|Tagged JSON over IPC| F
+    W -->|Tagged JSON over IPC| F
     T --> R["Recent Files JSON<br/>app data directory"]
     F -->|"get_recent_files IPC"| T
     F -->|"quit_app IPC"| T
@@ -62,7 +66,7 @@ The frontend initialization in `src/app.js` runs the following sequence:
 1. set up event listeners, keyboard shortcuts, and drag-and-drop (synchronous)
 2. load theme preference and recent files in parallel (`Promise.allSettled`)
 3. call `show_main_window` to reveal the fully rendered window
-4. check for a launch document path and load it if present
+4. check for a launch file path and load it if present
 
 This means the user never sees a blank or partially rendered window. An inline script in `index.html` also applies the dark theme from `localStorage` before any paint to prevent a flash of the wrong theme.
 
@@ -80,8 +84,10 @@ The frontend in `src/app.js` supports multiple entry points for loading a docume
 All of these converge on `loadDocument(path)`, which calls:
 
 ```js
-invoke('open_docx', { path })
+invoke('open_file', { path })
 ```
+
+The backend returns either `{ type: "docx", document: ... }` or `{ type: "xlsx", workbook: ... }`. The frontend routes this through `renderOpenedFile`.
 
 ### 3. DOCX Parsing
 
@@ -103,11 +109,25 @@ invoke('open_docx', { path })
 
 This keeps the parser organized around OOXML parts instead of handling everything in one pass.
 
-### 4. IPC Boundary
+### 4. XLSX Parsing
 
-The parsed Rust `Document` is serialized through `serde` and sent to the frontend as JSON. This model is the contract between backend and frontend.
+`XlsxParser::from_path` in `src-tauri/src/xlsx_parser.rs` opens and validates the workbook ZIP. `XlsxParser::parse` builds a fast preview model by reading:
 
-The frontend assumes a tagged block model:
+- `xl/workbook.xml`
+- `xl/_rels/workbook.xml.rels`
+- `xl/sharedStrings.xml` when needed
+- `xl/styles.xml` for basic number/date/text formats
+- the active worksheet XML
+
+The parser returns a sparse `XlsxWorkbook` model with sheet summaries and one loaded sheet. Additional sheets are loaded on demand through `open_xlsx_sheet`, so Hermes does not parse every sheet before showing the workbook.
+
+The XLSX path is intentionally a preview path. It displays cached formula values when present, but does not evaluate formulas or render charts, pivots, macros, embedded objects, or full Excel-compatible layout.
+
+### 5. IPC Boundary
+
+Parsed Rust models are serialized through `serde` and sent to the frontend as tagged JSON. This model is the contract between backend and frontend.
+
+For DOCX, the frontend assumes a tagged block model:
 
 - `paragraph`
 - `table`
@@ -115,7 +135,15 @@ The frontend assumes a tagged block model:
 
 along with collections for comments, headers, footers, footnotes, styles, and images.
 
-### 5. Rendering
+For XLSX, the frontend assumes a sparse workbook model:
+
+- workbook sheet summaries
+- active sheet rows
+- sparse cells keyed by row and column indexes
+- cell display values, raw values, value types, formulas, style indexes, and number formats
+- preview limits and truncation metadata
+
+### 6. Rendering
 
 `renderDocument(doc)` in `src/app.js` drives the UI refresh. It:
 
@@ -137,22 +165,33 @@ Rendering is mostly composed from these functions:
 
 Headers and footers are currently rendered per page using the first available header/footer entry in the model.
 
+`renderWorkbook(workbook)` renders XLSX files as a spreadsheet preview:
+
+- workbook title and dimensions
+- sheet tabs
+- sticky row and column headers
+- sparse cell values in a grid
+- truncation notices for large sheets
+
 ## Backend Architecture
 
 ### Tauri Command Layer
 
 The backend command layer in `src-tauri/src/main.rs` is intentionally thin:
 
-- `open_docx` parses the file and stores it in recent files
+- `open_file` detects DOCX/XLSX, parses the file, and stores it in recent files
+- `open_docx` remains available for compatibility with the existing DOCX command path
+- `open_xlsx_sheet` parses one XLSX sheet on demand
 - `get_recent_files` reads persisted history
+- `get_launch_file_path` returns a supported launch path
 - `show_main_window` reveals the window after the frontend is ready
 - `quit_app` exits the application
 
-This keeps document parsing in `parser.rs` and UI logic in the frontend.
+This keeps parsing in dedicated parser modules and UI logic in the frontend.
 
 ### Parser Responsibilities
 
-The parser is responsible for:
+The DOCX parser is responsible for:
 
 - opening the DOCX ZIP archive
 - reading OOXML files by path
@@ -162,7 +201,16 @@ The parser is responsible for:
 
 Internally, the parser uses temporary context objects while walking XML, then converts them into stable model structs.
 
-### Document Model
+The XLSX parser is responsible for:
+
+- opening the XLSX ZIP archive
+- resolving workbook relationships
+- reading shared strings only for referenced preview cells
+- interpreting basic number/date/text formats
+- producing sparse rows and cells
+- applying row, column, and cell limits with visible truncation metadata
+
+### DOCX Document Model
 
 `src-tauri/src/model.rs` defines the central domain model:
 
@@ -177,6 +225,20 @@ Internally, the parser uses temporary context objects while walking XML, then co
 - `Style`
 
 This model is the core architectural seam in the app. If the frontend changes, the parsing pipeline can remain mostly intact as long as this contract stays compatible.
+
+### XLSX Workbook Model
+
+`src-tauri/src/xlsx_model.rs` defines the spreadsheet preview model:
+
+- `XlsxWorkbook`
+- `XlsxSheetSummary`
+- `XlsxSheet`
+- `XlsxRow`
+- `XlsxCell`
+- `XlsxCellValueType`
+- `XlsxPreviewLimits`
+
+This model is intentionally sparse so large sheets do not allocate empty cells.
 
 ### Persistence
 
@@ -204,6 +266,7 @@ It also includes a floating find bar.
 The frontend in `src/app.js` uses module-level mutable state instead of a framework store:
 
 - `currentDocument`
+- `currentWorkbook`
 - `currentFilePath`
 - `commentsVisible`
 - `findMatches`
@@ -218,8 +281,8 @@ For the current app size, this keeps the runtime simple and avoids introducing a
 The frontend renders directly into DOM nodes rather than using templates or a virtual DOM. The overall approach is:
 
 - parse once on the backend
-- render whole-page structures in the frontend
-- update the full document view on each open
+- render whole-page DOCX structures or XLSX grid structures in the frontend
+- update the full view on each open or sheet switch
 
 This is straightforward and easy to reason about, but it also means very large documents may eventually need incremental rendering or virtualization.
 
@@ -248,12 +311,15 @@ Hermes is intentionally built around a small runtime and a fairly direct renderi
 
 ### Parser-Side Measures
 
-- `DocxParser::from_path` rejects empty files and refuses documents larger than `100 MB`, which prevents obviously pathological inputs from consuming excessive memory or CPU.
+- `DocxParser::from_path` and `XlsxParser::from_path` reject empty files and refuse files larger than `100 MB`, which prevents obviously pathological inputs from consuming excessive memory or CPU.
 - Relationships are parsed once up front and cached in `self.relationships`, instead of reopening and reparsing the relationships file for each feature pass.
 - The parser tracks `referenced_image_ids` while walking document content, then loads only the images that were actually referenced in the rendered document model.
 - Unsupported EMF and WMF images are replaced with lightweight placeholder data URIs instead of attempting expensive conversion work in-process.
 - OOXML parts are parsed with `quick-xml`'s event reader, which keeps parsing logic streaming-oriented and avoids building a full XML DOM in memory.
 - Style inheritance is resolved once in Rust before the model reaches the frontend, which reduces repeated style lookup and merge work during rendering.
+- The XLSX parser loads only the active sheet up front and loads other sheets on demand.
+- The XLSX parser stores sparse rows and cells, caps preview rows, columns, and non-empty cells, and reports truncation metadata to the UI.
+- Shared strings are streamed and only retained for string indexes referenced by preview cells.
 
 ### Startup Optimization
 
@@ -268,12 +334,14 @@ Hermes is intentionally built around a small runtime and a fairly direct renderi
 - Page grouping is done once per open via `splitIntoPages(doc.body)`, rather than recalculating page structure repeatedly during interaction.
 - In-document find is debounced by `120 ms`, which prevents a full highlight pass on every keystroke while the user is still typing.
 - Recent files are deduplicated and capped at `8` entries, which keeps persistence small and quick to load.
+- XLSX grid rendering caps DOM cells for very large loaded previews to keep the UI responsive.
 
 ### Tradeoffs and Remaining Gaps
 
 - OOXML parts are still read into strings before parsing, so Hermes is not fully streaming end-to-end.
 - The frontend currently rerenders the full document on open instead of virtualizing or incrementally updating very large documents.
 - Images are embedded as data URIs for simple rendering, which is convenient but can increase payload size for image-heavy files.
+- XLSX support is a fast preview path, not a full spreadsheet engine.
 
 ## Development Setup
 
@@ -339,11 +407,11 @@ That means `cargo tauri dev` currently expects a frontend dev server at `http://
 ## Current Product Boundaries and Limitations
 
 - Hermes is a viewer, not an editor.
-- There is no support for editing or saving back to DOCX.
+- There is no support for editing or saving back to DOCX or XLSX.
 - Hermes does not aim for full OOXML compatibility.
-- Macros, embedded OLE content, and similar advanced document features are not supported.
+- Macros, embedded OLE content, charts, pivot tables, formula evaluation, and similar advanced document features are not supported.
 - Pagination is driven by explicit page breaks rather than a full layout engine.
-- Very large or structurally complex documents may need graceful degradation in the renderer.
+- Very large or structurally complex documents and workbooks may need graceful degradation in the renderer.
 - The repository currently contains both a shared parser crate and a Tauri-specific parser implementation.
 - The development flow around the Tauri dev configuration is still rough.
 
@@ -353,6 +421,8 @@ If Hermes grows, the cleanest extension seams are:
 
 - expanding the `Document` model in `src-tauri/src/model.rs`
 - adding parser phases in `src-tauri/src/parser.rs`
+- expanding the `XlsxWorkbook` model in `src-tauri/src/xlsx_model.rs`
+- adding targeted worksheet features in `src-tauri/src/xlsx_parser.rs`
 - introducing clearer frontend view modules around rendering and interaction concerns
 - consolidating the shared parser logic so the desktop app and root crate do not drift
 

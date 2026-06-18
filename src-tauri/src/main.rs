@@ -1,8 +1,11 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use hermes_app::excel_parser;
 use hermes_app::model::Document;
 use hermes_app::parser::DocxParser;
+use hermes_app::xlsx_model::{XlsxSheet, XlsxWorkbook};
+use hermes_app::xlsx_parser::XlsxParser;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,7 +18,26 @@ const RECENT_FILES_FILE_NAME: &str = "recent-files.json";
 
 #[derive(Debug, Default)]
 struct LaunchState {
-    docx_path: Mutex<Option<String>>,
+    file_path: Mutex<Option<String>>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum OpenedFile {
+    Docx { document: Document },
+    Xlsx { workbook: XlsxWorkbook },
+}
+
+#[derive(Debug, Clone, Copy)]
+enum FileKind {
+    Docx,
+    Spreadsheet(SpreadsheetKind),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SpreadsheetKind {
+    OpenXml,
+    BinaryOrLegacy,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -30,33 +52,138 @@ struct RecentFiles {
 
 #[tauri::command]
 fn open_docx(path: String, app: tauri::AppHandle) -> Result<Document, String> {
+    let document = parse_docx_document(&path)?;
+    remember_opened_file(&app, &path);
+    Ok(document)
+}
+
+#[tauri::command]
+fn open_file(path: String, app: tauri::AppHandle) -> Result<OpenedFile, String> {
+    let file_kind = file_kind_from_path(Path::new(&path)).ok_or_else(|| {
+        "Unsupported file type. Hermes can open .docx, .xlsx, .xlsm, .xlsb, and .xls files."
+            .to_string()
+    })?;
+
+    let opened_file = match file_kind {
+        FileKind::Docx => OpenedFile::Docx {
+            document: parse_docx_document(&path)?,
+        },
+        FileKind::Spreadsheet(kind) => OpenedFile::Xlsx {
+            workbook: parse_spreadsheet_workbook(&path, kind)?,
+        },
+    };
+
+    remember_opened_file(&app, &path);
+    Ok(opened_file)
+}
+
+#[tauri::command]
+fn open_xlsx_sheet(path: String, sheet_index: usize) -> Result<XlsxSheet, String> {
+    let Some(FileKind::Spreadsheet(kind)) = file_kind_from_path(Path::new(&path)) else {
+        return Err("Unsupported file type. Expected an Excel workbook.".to_string());
+    };
+
+    parse_spreadsheet_sheet(&path, kind, sheet_index)
+}
+
+fn parse_docx_document(path: &str) -> Result<Document, String> {
     println!("Opening DOCX file: {}", path);
-    
-    match DocxParser::from_path(&path) {
-        Ok(mut parser) => {
-            match parser.parse() {
-                Ok(document) => {
-                    println!("Successfully parsed DOCX file: {} paragraphs, {} comments, {} images", 
-                        document.body.len(), 
-                        document.comments.len(), 
-                        document.images.len()
-                    );
-                    if let Err(err) = remember_recent_file(&app, &path) {
-                        eprintln!("Failed to store recent file '{}': {}", path, err);
-                    }
-                    Ok(document)
-                }
-                Err(e) => {
-                    let error_msg = format!("Failed to parse DOCX file: {}", e);
-                    eprintln!("{}", error_msg);
-                    Err(error_msg)
-                }
+
+    match DocxParser::from_path(path) {
+        Ok(mut parser) => match parser.parse() {
+            Ok(document) => {
+                println!(
+                    "Successfully parsed DOCX file: {} paragraphs, {} comments, {} images",
+                    document.body.len(),
+                    document.comments.len(),
+                    document.images.len()
+                );
+                Ok(document)
             }
-        }
+            Err(e) => {
+                let error_msg = format!("Failed to parse DOCX file: {}", e);
+                eprintln!("{}", error_msg);
+                Err(error_msg)
+            }
+        },
         Err(e) => {
             let error_msg = format!("Failed to open DOCX file: {}", e);
             eprintln!("{}", error_msg);
             Err(error_msg)
+        }
+    }
+}
+
+fn parse_xlsx_workbook(path: &str) -> Result<XlsxWorkbook, String> {
+    println!("Opening XLSX file: {}", path);
+
+    match XlsxParser::from_path(path) {
+        Ok(mut parser) => match parser.parse() {
+            Ok(workbook) => {
+                let active_rows = workbook
+                    .active_sheet
+                    .as_ref()
+                    .map(|sheet| sheet.rows.len())
+                    .unwrap_or_default();
+                println!(
+                    "Successfully parsed XLSX file: {} sheets, {} preview rows",
+                    workbook.sheets.len(),
+                    active_rows
+                );
+                Ok(workbook)
+            }
+            Err(e) => {
+                let error_msg = format!("Failed to parse XLSX file: {}", e);
+                eprintln!("{}", error_msg);
+                Err(error_msg)
+            }
+        },
+        Err(e) => {
+            let error_msg = format!("Failed to open XLSX file: {}", e);
+            eprintln!("{}", error_msg);
+            Err(error_msg)
+        }
+    }
+}
+
+fn parse_spreadsheet_workbook(path: &str, kind: SpreadsheetKind) -> Result<XlsxWorkbook, String> {
+    match kind {
+        SpreadsheetKind::OpenXml => parse_xlsx_workbook(path),
+        SpreadsheetKind::BinaryOrLegacy => {
+            println!("Opening Excel file: {}", path);
+            let workbook = excel_parser::parse_workbook(path)?;
+            let active_rows = workbook
+                .active_sheet
+                .as_ref()
+                .map(|sheet| sheet.rows.len())
+                .unwrap_or_default();
+            println!(
+                "Successfully parsed Excel file: {} sheets, {} preview rows",
+                workbook.sheets.len(),
+                active_rows
+            );
+            Ok(workbook)
+        }
+    }
+}
+
+fn parse_spreadsheet_sheet(
+    path: &str,
+    kind: SpreadsheetKind,
+    sheet_index: usize,
+) -> Result<XlsxSheet, String> {
+    match kind {
+        SpreadsheetKind::OpenXml => {
+            println!("Opening XLSX sheet {} from file: {}", sheet_index, path);
+            let mut parser = XlsxParser::from_path(path)
+                .map_err(|e| format!("Failed to open XLSX file: {}", e))?;
+            parser
+                .parse_sheet(sheet_index)
+                .map_err(|e| format!("Failed to parse XLSX sheet: {}", e))
+        }
+        SpreadsheetKind::BinaryOrLegacy => {
+            println!("Opening Excel sheet {} from file: {}", sheet_index, path);
+            excel_parser::parse_sheet(path, sheet_index)
         }
     }
 }
@@ -67,9 +194,9 @@ fn get_recent_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-fn get_launch_docx_path(state: tauri::State<LaunchState>) -> Result<Option<String>, String> {
+fn get_launch_file_path(state: tauri::State<LaunchState>) -> Result<Option<String>, String> {
     let mut path = state
-        .docx_path
+        .file_path
         .lock()
         .map_err(|_| "Could not access launch state".to_string())?;
     Ok(path.take())
@@ -149,8 +276,8 @@ fn load_recent_files(app: &tauri::AppHandle) -> Result<Vec<String>, String> {
         return Ok(Vec::new());
     }
 
-    let content = fs::read_to_string(&path)
-        .map_err(|e| format!("Could not read recent files: {}", e))?;
+    let content =
+        fs::read_to_string(&path).map_err(|e| format!("Could not read recent files: {}", e))?;
 
     let mut recent_files: RecentFiles = serde_json::from_str(&content)
         .map_err(|e| format!("Could not parse recent files: {}", e))?;
@@ -177,6 +304,12 @@ fn remember_recent_file(app: &tauri::AppHandle, path: &str) -> Result<(), String
     save_recent_files(app, &recent_files)
 }
 
+fn remember_opened_file(app: &tauri::AppHandle, path: &str) {
+    if let Err(err) = remember_recent_file(app, path) {
+        eprintln!("Failed to store recent file '{}': {}", path, err);
+    }
+}
+
 fn normalize_theme(theme: &str) -> Option<&'static str> {
     match theme {
         "light" => Some("light"),
@@ -185,14 +318,14 @@ fn normalize_theme(theme: &str) -> Option<&'static str> {
     }
 }
 
-fn find_launch_docx_path() -> Option<String> {
+fn find_launch_file_path() -> Option<String> {
     std::env::args_os()
         .skip(1)
-        .find_map(|arg| docx_path_from_arg(PathBuf::from(arg)))
+        .find_map(|arg| supported_file_path_from_arg(PathBuf::from(arg)))
 }
 
-fn docx_path_from_arg(path: PathBuf) -> Option<String> {
-    if !is_docx_path(&path) {
+fn supported_file_path_from_arg(path: PathBuf) -> Option<String> {
+    if file_kind_from_path(&path).is_none() {
         return None;
     }
 
@@ -209,16 +342,23 @@ fn docx_path_from_arg(path: PathBuf) -> Option<String> {
     Some(absolute_path.to_string_lossy().into_owned())
 }
 
-fn is_docx_path(path: &Path) -> bool {
-    path.extension()
+fn file_kind_from_path(path: &Path) -> Option<FileKind> {
+    match path
+        .extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| ext.eq_ignore_ascii_case("docx"))
-        .unwrap_or(false)
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("docx") => Some(FileKind::Docx),
+        Some("xlsx") | Some("xlsm") => Some(FileKind::Spreadsheet(SpreadsheetKind::OpenXml)),
+        Some("xls") | Some("xlsb") => Some(FileKind::Spreadsheet(SpreadsheetKind::BinaryOrLegacy)),
+        _ => None,
+    }
 }
 
 fn main() {
     let launch_state = LaunchState {
-        docx_path: Mutex::new(find_launch_docx_path()),
+        file_path: Mutex::new(find_launch_file_path()),
     };
 
     tauri::Builder::default()
@@ -227,23 +367,16 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             open_docx,
+            open_file,
+            open_xlsx_sheet,
             get_recent_files,
-            get_launch_docx_path,
+            get_launch_file_path,
             get_theme_preference,
             set_theme_preference,
             show_main_window,
             quit_app
         ])
-        .setup(|_app| {
-            #[cfg(debug_assertions)]
-            {
-                if let Some(window) = _app.get_webview_window("main") {
-                    window.open_devtools();
-                }
-            }
-            
-            Ok(())
-        })
+        .setup(|_app| Ok(()))
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

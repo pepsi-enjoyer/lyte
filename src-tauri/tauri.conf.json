@@ -39,7 +39,44 @@
     ],
     "category": "Utility",
     "copyright": "",
-    "shortDescription": "Convert DOCX files to HTML",
-    "longDescription": "A desktop application for converting Microsoft Word DOCX files to HTML with full formatting preservation"
+    "shortDescription": "Open DOCX and XLSX files quickly",
+    "longDescription": "A lightweight desktop application for reading DOCX documents and previewing XLSX workbooks",
+    "fileAssociations": [
+      {
+        "ext": ["docx"],
+        "name": "Hermes Word Document",
+        "description": "Microsoft Word document",
+        "role": "Viewer",
+        "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      },
+      {
+        "ext": ["xlsx"],
+        "name": "Hermes Excel Workbook",
+        "description": "Microsoft Excel workbook",
+        "role": "Viewer",
+        "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      },
+      {
+        "ext": ["xlsm"],
+        "name": "Hermes Excel Macro-Enabled Workbook",
+        "description": "Microsoft Excel macro-enabled workbook",
+        "role": "Viewer",
+        "mimeType": "application/vnd.ms-excel.sheet.macroEnabled.12"
+      },
+      {
+        "ext": ["xlsb"],
+        "name": "Hermes Excel Binary Workbook",
+        "description": "Microsoft Excel binary workbook",
+        "role": "Viewer",
+        "mimeType": "application/vnd.ms-excel.sheet.binary.macroEnabled.12"
+      },
+      {
+        "ext": ["xls"],
+        "name": "Hermes Excel 97-2003 Workbook",
+        "description": "Microsoft Excel 97-2003 workbook",
+        "role": "Viewer",
+        "mimeType": "application/vnd.ms-excel"
+      }
+    ]
   }
 }
