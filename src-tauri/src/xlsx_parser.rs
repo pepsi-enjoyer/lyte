@@ -1,6 +1,6 @@
 use crate::xlsx_model::{
-    XlsxCell, XlsxCellValueType, XlsxImage, XlsxPreviewLimits, XlsxRow, XlsxSheet, XlsxSheetSummary,
-    XlsxWorkbook,
+    XlsxCell, XlsxCellValueType, XlsxColumn, XlsxImage, XlsxPreviewLimits, XlsxRow, XlsxSheet,
+    XlsxSheetSummary, XlsxWorkbook,
 };
 use base64::Engine;
 use quick_xml::events::{BytesStart, Event};
@@ -316,10 +316,23 @@ impl XlsxParser {
         let mut collecting_inline_text = false;
         let mut in_inline_string = false;
         let mut stop = false;
+        let mut default_col_width = None;
+        let mut default_row_height = None;
+        let mut columns: Vec<XlsxColumn> = Vec::new();
 
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(Event::Start(ref e)) => match local_name(e.name().as_ref()) {
+                    b"sheetFormatPr" => {
+                        let (col_width, row_height) = parse_sheet_format_pr(e);
+                        default_col_width = default_col_width.or(col_width);
+                        default_row_height = default_row_height.or(row_height);
+                    }
+                    b"col" => {
+                        if let Some(column) = parse_col(e) {
+                            columns.push(column);
+                        }
+                    }
                     b"dimension" => {
                         if let Some((row_count, column_count)) =
                             get_attr(e, b"ref").and_then(|value| parse_dimension_ref(&value))
@@ -351,6 +364,7 @@ impl XlsxParser {
                             current_row = Some(ParsedRow {
                                 index: row_index,
                                 cells: Vec::new(),
+                                height: get_attr(e, b"ht").and_then(|value| value.parse().ok()),
                             });
                         }
                     }
@@ -367,6 +381,16 @@ impl XlsxParser {
                     _ => {}
                 },
                 Ok(Event::Empty(ref e)) => match local_name(e.name().as_ref()) {
+                    b"sheetFormatPr" => {
+                        let (col_width, row_height) = parse_sheet_format_pr(e);
+                        default_col_width = default_col_width.or(col_width);
+                        default_row_height = default_row_height.or(row_height);
+                    }
+                    b"col" => {
+                        if let Some(column) = parse_col(e) {
+                            columns.push(column);
+                        }
+                    }
                     b"dimension" => {
                         if let Some((row_count, column_count)) =
                             get_attr(e, b"ref").and_then(|value| parse_dimension_ref(&value))
@@ -493,6 +517,9 @@ impl XlsxParser {
             truncated: !truncated_reasons.is_empty(),
             truncated_reasons,
             shared_string_indexes,
+            default_col_width,
+            default_row_height,
+            columns,
         })
     }
 
@@ -796,6 +823,9 @@ struct ParsedSheet {
     truncated: bool,
     truncated_reasons: Vec<String>,
     shared_string_indexes: HashSet<usize>,
+    default_col_width: Option<f64>,
+    default_row_height: Option<f64>,
+    columns: Vec<XlsxColumn>,
 }
 
 impl ParsedSheet {
@@ -813,6 +843,7 @@ impl ParsedSheet {
                         .into_iter()
                         .map(|cell| cell.into_cell(shared_strings))
                         .collect(),
+                    height: row.height,
                 })
                 .collect(),
             row_count: self.row_count,
@@ -822,6 +853,9 @@ impl ParsedSheet {
             truncated: self.truncated,
             truncated_reasons: self.truncated_reasons,
             images: Vec::new(),
+            default_col_width: self.default_col_width,
+            default_row_height: self.default_row_height,
+            columns: self.columns,
         }
     }
 }
@@ -829,6 +863,7 @@ impl ParsedSheet {
 struct ParsedRow {
     index: u32,
     cells: Vec<ParsedCell>,
+    height: Option<f64>,
 }
 
 struct ParsedCell {
@@ -1129,6 +1164,27 @@ fn normalize_package_path(path: &str) -> String {
         }
     }
     parts.join("/")
+}
+
+fn parse_sheet_format_pr(e: &BytesStart) -> (Option<f64>, Option<f64>) {
+    let col_width = get_attr(e, b"defaultColWidth").and_then(|value| value.parse().ok());
+    let row_height = get_attr(e, b"defaultRowHeight").and_then(|value| value.parse().ok());
+    (col_width, row_height)
+}
+
+fn parse_col(e: &BytesStart) -> Option<XlsxColumn> {
+    let min = get_attr(e, b"min").and_then(|value| value.parse().ok())?;
+    let max = get_attr(e, b"max").and_then(|value| value.parse().ok())?;
+    let width = get_attr(e, b"width").and_then(|value| value.parse().ok())?;
+    let hidden = get_attr(e, b"hidden")
+        .map(|value| is_truthy(&value))
+        .unwrap_or(false);
+    Some(XlsxColumn {
+        min,
+        max,
+        width,
+        hidden,
+    })
 }
 
 fn rels_path_for(path: &str) -> String {

@@ -25,6 +25,15 @@ quick-xml = "0.36"
 base64 = "0.22"
 thiserror = "1.0"
 
+# EMF -> PNG rasterization (Windows GDI), so vector images in DOCX render.
+png = "0.17"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+] }
+
 [profile.dev]
 debug = 1              # Line tables only -- much faster linking
 incremental = true

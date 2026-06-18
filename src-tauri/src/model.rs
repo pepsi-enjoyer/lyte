@@ -140,6 +140,10 @@ pub struct Style {
     pub alignment: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub heading_level: Option<u8>, // 1-6 for heading styles
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub num_id: Option<u32>, // list numbering id from the style's pPr/numPr
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ilvl: Option<u8>, // list level from the style's pPr/numPr
 }
 
 impl Document {
@@ -227,6 +231,8 @@ impl Style {
             color: None,
             alignment: None,
             heading_level: None,
+            num_id: None,
+            ilvl: None,
         }
     }
 }

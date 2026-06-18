@@ -33,6 +33,14 @@ pub struct XlsxSheet {
     pub truncated_reasons: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<XlsxImage>,
+    /// Default column width in Excel character units, when specified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_col_width: Option<f64>,
+    /// Default row height in points, when specified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_row_height: Option<f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub columns: Vec<XlsxColumn>,
 }
 
 /// A picture anchored onto a worksheet. Anchor coordinates follow the
@@ -67,6 +75,21 @@ pub struct XlsxImage {
 pub struct XlsxRow {
     pub index: u32,
     pub cells: Vec<XlsxCell>,
+    /// Custom row height in points, when the workbook overrides the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<f64>,
+}
+
+/// A column-width definition from the worksheet `<cols>` block. `min`/`max` are
+/// the inclusive 1-based column range the width applies to; `width` is in the
+/// Excel "characters of the maximum digit width" unit.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct XlsxColumn {
+    pub min: u32,
+    pub max: u32,
+    pub width: f64,
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

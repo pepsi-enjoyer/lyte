@@ -183,6 +183,7 @@ fn range_to_sheet(
             rows.push(XlsxRow {
                 index: row_index,
                 cells,
+                height: None,
             });
         }
 
@@ -202,6 +203,9 @@ fn range_to_sheet(
         truncated: !truncated_reasons.is_empty(),
         truncated_reasons,
         images: Vec::new(),
+        default_col_width: None,
+        default_row_height: None,
+        columns: Vec::new(),
     }
 }
 

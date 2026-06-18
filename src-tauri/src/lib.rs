@@ -1,3 +1,4 @@
+pub mod emf;
 pub mod excel_parser;
 pub mod model;
 pub mod parser;

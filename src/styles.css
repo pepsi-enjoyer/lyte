@@ -19,7 +19,8 @@ body {
     font-family: Calibri, 'Segoe UI', Arial, sans-serif;
     background: var(--bg);
     color: var(--text);
-    min-height: 100vh;
+    height: 100vh;
+    overflow: hidden;
     display: flex;
     flex-direction: row;
     align-items: stretch;
@@ -378,9 +379,20 @@ body {
 }
 
 /* Spreadsheet preview */
+/* Spreadsheets use the full desk with no page-style padding, and the grid
+   itself owns scrolling so both scrollbars stay pinned in view. */
+.desk--spreadsheet {
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
 .spreadsheet-content {
     align-items: stretch;
     width: 100%;
+    flex: 1;
+    min-height: 0;
 }
 
 .spreadsheet-view {
@@ -388,6 +400,10 @@ body {
     min-width: 720px;
     background: var(--surface-bg);
     color: var(--text);
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
 }
 
 .spreadsheet-header {
@@ -449,9 +465,10 @@ body {
 }
 
 .spreadsheet-grid-wrap {
+    flex: 1;
     width: 100%;
     overflow: auto;
-    max-height: calc(100vh - 220px);
+    min-height: 0;
     background: var(--surface-bg);
 }
 
@@ -539,6 +556,49 @@ body {
 
 .spreadsheet-grid td.xlsx-cell-formula {
     box-shadow: inset 3px 0 0 var(--link-color);
+}
+
+/* Sized grid: column widths come from <colgroup> and row heights are set
+   inline, so the cells must not impose their own min/max sizing. */
+.spreadsheet-grid--sized {
+    table-layout: fixed;
+    width: auto;
+    min-width: 0;
+}
+
+.spreadsheet-grid--sized th,
+.spreadsheet-grid--sized td {
+    min-width: 0;
+    max-width: none;
+    height: auto;
+}
+
+/* Column resize handles on header cells. */
+.spreadsheet-grid thead th {
+    position: sticky; /* already sticky; ensures the handle anchors here */
+}
+
+.col-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+    z-index: 5;
+}
+
+.col-resizer:hover {
+    background: var(--link-color);
+    opacity: 0.6;
+}
+
+/* While dragging, keep the whole grid in resize cursor and suppress selection. */
+body.col-resizing,
+body.col-resizing * {
+    cursor: col-resize !important;
+    user-select: none !important;
 }
 
 .spreadsheet-empty {

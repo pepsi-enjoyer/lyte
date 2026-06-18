@@ -72,7 +72,6 @@ function setupEventListeners() {
     document.getElementById('find-prev-btn').addEventListener('click', () => navigateFind(-1));
     recentFilesList.addEventListener('click', handleRecentFilesClick);
     desk.addEventListener('click', handleDeskClick);
-    desk.addEventListener('wheel', handleDocumentZoomWheel, { passive: false });
     commentsList.addEventListener('click', handleCommentListClick);
     findInput.addEventListener('input', scheduleFind);
     findInput.addEventListener('keydown', (e) => {
@@ -301,6 +300,17 @@ function initializeDocumentZoom() {
     applyDocumentZoom(Number.isFinite(storedZoom) ? storedZoom : DOC_ZOOM_DEFAULT, { announce: false });
 }
 
+// Ctrl+wheel zoom only applies to DOCX. The listener is non-passive (it calls
+// preventDefault), which forces wheel events onto the main thread and makes
+// scrolling janky — so it is attached only while a document is shown and
+// detached for spreadsheets, keeping grid scrolling on the fast path.
+function setDocumentZoomWheel(enabled) {
+    desk.removeEventListener('wheel', handleDocumentZoomWheel);
+    if (enabled) {
+        desk.addEventListener('wheel', handleDocumentZoomWheel, { passive: false });
+    }
+}
+
 function handleDocumentZoomWheel(event) {
     if (!event.ctrlKey || event.deltaY === 0) return;
 
@@ -367,6 +377,16 @@ function renderWorkbook(workbook) {
     documentView.style.display = 'flex';
     deskContent.replaceChildren();
     deskContent.classList.add('spreadsheet-content');
+    desk.classList.add('desk--spreadsheet');
+    setDocumentZoomWheel(false);
+
+    // Seed the per-workbook sheet cache so revisiting a tab needs no re-parse.
+    if (workbook.active_sheet) {
+        const cache = workbook._sheetCache || (workbook._sheetCache = new Map());
+        if (!cache.has(workbook.active_sheet_index)) {
+            cache.set(workbook.active_sheet_index, workbook.active_sheet);
+        }
+    }
     commentsVisible = false;
     commentsPanel.style.display = 'none';
     renderComments([]);
@@ -442,12 +462,24 @@ function renderSheetTabs(workbook) {
 }
 
 async function loadWorkbookSheet(sheetIndex) {
-    if (!invoke || !currentWorkbook || !currentFilePath) return;
+    if (!currentWorkbook) return;
+
+    // Serve cached sheets instantly — no backend round-trip or re-parse.
+    const cache = currentWorkbook._sheetCache || (currentWorkbook._sheetCache = new Map());
+    if (cache.has(sheetIndex)) {
+        currentWorkbook.active_sheet_index = sheetIndex;
+        currentWorkbook.active_sheet = cache.get(sheetIndex);
+        renderWorkbook(currentWorkbook);
+        return;
+    }
+
+    if (!invoke || !currentFilePath) return;
 
     showStatus('Loading sheet...', 'loading', 1500);
 
     try {
         const sheet = await invoke('open_xlsx_sheet', { path: currentFilePath, sheetIndex });
+        cache.set(sheetIndex, sheet);
         currentWorkbook.active_sheet_index = sheet.index;
         currentWorkbook.active_sheet = sheet;
         renderWorkbook(currentWorkbook);
@@ -457,25 +489,68 @@ async function loadWorkbookSheet(sheetIndex) {
     }
 }
 
+const ROW_HEADER_WIDTH = 54;
+
 function renderSheetGrid(sheet, limits = {}) {
     if (!sheet.rows || sheet.rows.length === 0) {
         return renderEmptySheetState();
     }
 
     const maxColumns = limits.max_columns || 200;
-    const observedColumns = Math.max(1, ...sheet.rows.flatMap(row => (row.cells || []).map(cell => cell.column || 1)));
-    const displayColumnCount = Math.max(1, Math.min(observedColumns, maxColumns));
+    const maxRows = limits.max_rows || 2000;
+    const images = sheet.images || [];
+
+    // Find the data extent with plain loops; spreading a large array into
+    // Math.max can overflow the call stack on big sheets.
+    let observedColumns = 1;
+    let observedRows = 1;
+    for (const row of sheet.rows) {
+        if (row.index > observedRows) observedRows = row.index;
+        const cells = row.cells;
+        if (cells && cells.length) {
+            // cells are in ascending column order, so the last one is the widest.
+            const lastColumn = cells[cells.length - 1].column || 1;
+            if (lastColumn > observedColumns) observedColumns = lastColumn;
+        }
+    }
+
+    // Extend the visible range so picture anchors always land on real cells.
+    const imageColumns = images.length
+        ? Math.max(0, ...images.map(image => (image.to_col != null ? image.to_col : image.from_col) + 1))
+        : 0;
+    const displayColumnCount = Math.max(1, Math.min(Math.max(observedColumns, imageColumns), maxColumns));
+
+    const imageRows = images.length
+        ? Math.max(0, ...images.map(image => (image.to_row != null ? image.to_row : image.from_row) + 1))
+        : 0;
+    const lastRow = Math.max(observedRows, imageRows, 1);
     const maxGridCells = 60000;
-    const displayRowCount = Math.max(1, Math.floor(maxGridCells / displayColumnCount));
-    const displayRows = sheet.rows.slice(0, displayRowCount);
+    const maxRowsByCells = Math.max(1, Math.floor(maxGridCells / displayColumnCount));
+    const displayRowCount = Math.min(lastRow, maxRowsByCells, maxRows);
+
+    // Translate the workbook's own geometry into pixels so the grid mirrors
+    // Excel — this is what makes anchored images line up with empty cells.
+    const defaultColChars = sheet.default_col_width || 8.43;
+    const defaultRowPts = sheet.default_row_height || 15;
+    const columnDefs = sheet.columns || [];
+    const columnWidthPx = (column) => {
+        const definition = columnDefs.find(col => column >= col.min && column <= col.max);
+        if (definition) {
+            return definition.hidden ? 0 : charsToPixels(definition.width);
+        }
+        return charsToPixels(defaultColChars);
+    };
+
+    const rowsByIndex = new Map(sheet.rows.map(row => [row.index, row]));
+    const rowHeightPx = (row) => pointsToPixels(row && row.height != null ? row.height : defaultRowPts);
 
     const wrapper = document.createElement('div');
     wrapper.className = 'spreadsheet-grid-wrap';
 
-    if (displayRows.length < sheet.rows.length) {
+    if (displayRowCount < lastRow) {
         const notice = document.createElement('div');
         notice.className = 'spreadsheet-truncation';
-        notice.textContent = `Showing ${displayRows.length} of ${sheet.rows.length} loaded rows to keep rendering fast.`;
+        notice.textContent = `Showing ${displayRowCount} of ${lastRow} rows to keep rendering fast.`;
         wrapper.appendChild(notice);
     }
 
@@ -483,7 +558,30 @@ function renderSheetGrid(sheet, limits = {}) {
     gridLayer.className = 'spreadsheet-grid-layer';
 
     const table = document.createElement('table');
-    table.className = 'spreadsheet-grid';
+    table.className = 'spreadsheet-grid spreadsheet-grid--sized';
+
+    // Fixed column widths matching the workbook (table-layout: fixed honours these).
+    const colgroup = document.createElement('colgroup');
+    const headerCol = document.createElement('col');
+    headerCol.style.width = `${ROW_HEADER_WIDTH}px`;
+    colgroup.appendChild(headerCol);
+    const colElements = [];
+    for (let column = 1; column <= displayColumnCount; column++) {
+        const col = document.createElement('col');
+        col.style.width = `${columnWidthPx(column)}px`;
+        colgroup.appendChild(col);
+        colElements[column] = col;
+    }
+    table.appendChild(colgroup);
+
+    const recomputeTableWidth = () => {
+        let total = ROW_HEADER_WIDTH;
+        for (let column = 1; column <= displayColumnCount; column++) {
+            total += parseFloat(colElements[column].style.width) || 0;
+        }
+        table.style.width = `${total}px`;
+    };
+    recomputeTableWidth();
 
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
@@ -494,28 +592,47 @@ function renderSheetGrid(sheet, limits = {}) {
         const th = document.createElement('th');
         th.scope = 'col';
         th.textContent = columnName(column);
+        th.appendChild(makeColumnResizer(colElements[column], recomputeTableWidth, () => repositionImages()));
         headerRow.appendChild(th);
     }
     thead.appendChild(headerRow);
     table.appendChild(thead);
 
+    const defaultRowPx = pointsToPixels(defaultRowPts);
+    // A default-height row we can measure once: the browser renders rows at
+    // max(specified height, content height), and cell text usually forces a
+    // taller min height than the nominal row height. Measuring one default row
+    // captures that floor so image offsets don't drift down the sheet.
+    let measureRowEl = null;
+
     const tbody = document.createElement('tbody');
-    for (const row of displayRows) {
+    for (let rowIndex = 1; rowIndex <= displayRowCount; rowIndex++) {
+        const row = rowsByIndex.get(rowIndex);
         const tr = document.createElement('tr');
-        tr.dataset.rowIndex = String(row.index);
+        tr.style.height = `${rowHeightPx(row)}px`;
+        if (!measureRowEl && !(row && row.height != null)) {
+            measureRowEl = tr;
+        }
+
         const rowHeader = document.createElement('th');
         rowHeader.scope = 'row';
-        rowHeader.textContent = row.index;
+        rowHeader.textContent = rowIndex;
         tr.appendChild(rowHeader);
 
-        const cellsByColumn = new Map((row.cells || []).map(cell => [cell.column, cell]));
+        const cells = (row && row.cells) || [];
+        let cellPointer = 0;
         for (let column = 1; column <= displayColumnCount; column++) {
             const td = document.createElement('td');
-            const cell = cellsByColumn.get(column);
+            // cells are already in column order, so advance a pointer instead of
+            // building a per-row map.
+            const cell = cellPointer < cells.length && cells[cellPointer].column === column
+                ? cells[cellPointer++]
+                : null;
             if (cell) {
                 td.textContent = cell.value || '';
-                td.dataset.reference = cell.reference;
-                td.classList.add('xlsx-cell-' + cell.value_type);
+                if (cell.value_type !== 'string') {
+                    td.className = 'xlsx-cell-' + cell.value_type;
+                }
                 if (cell.formula) {
                     td.title = '=' + cell.formula;
                     td.classList.add('xlsx-cell-formula');
@@ -529,110 +646,155 @@ function renderSheetGrid(sheet, limits = {}) {
     table.appendChild(tbody);
     gridLayer.appendChild(table);
 
-    const images = sheet.images || [];
+    let imagesLayer = null;
     if (images.length) {
-        const imagesLayer = document.createElement('div');
+        imagesLayer = document.createElement('div');
         imagesLayer.className = 'spreadsheet-grid-images';
         gridLayer.appendChild(imagesLayer);
-        // Positions depend on the rendered cell geometry, so defer until the
-        // grid has been laid out in the DOM.
-        requestAnimationFrame(() => {
-            positionSheetImages(table, imagesLayer, images, displayColumnCount);
-        });
     }
+
+    // The header height and the rendered row-height floor are the only values
+    // that need measuring (they depend on font metrics); everything else is
+    // computed arithmetically. Both are cached after the first measurement.
+    let headerHeight = null;
+    let rowTops = null; // prefix sums of row tops within the body
+    let bodyHeight = 0;
+    let extrapolationRowPx = defaultRowPx;
+
+    const measureGeometry = () => {
+        headerHeight = table.tHead ? table.tHead.offsetHeight : defaultRowPx;
+        // Actual rendered height of a default row = max(nominal, content floor).
+        const contentMin = measureRowEl ? measureRowEl.offsetHeight : defaultRowPx;
+        extrapolationRowPx = Math.max(defaultRowPx, contentMin);
+        rowTops = new Array(displayRowCount + 2);
+        let acc = 0;
+        for (let rowIndex = 1; rowIndex <= displayRowCount; rowIndex++) {
+            rowTops[rowIndex] = acc;
+            const row = rowsByIndex.get(rowIndex);
+            const nominal = row && row.height != null ? pointsToPixels(row.height) : defaultRowPx;
+            acc += Math.max(nominal, contentMin);
+        }
+        rowTops[displayRowCount + 1] = acc;
+        bodyHeight = acc;
+    };
+
+    const placeImages = () => {
+        if (!imagesLayer) return;
+        if (rowTops == null) {
+            measureGeometry();
+        }
+
+        // Prefix sums of column left edges (recomputed since resizing changes them).
+        const colLefts = new Array(displayColumnCount + 2);
+        colLefts[1] = ROW_HEADER_WIDTH;
+        for (let column = 1; column <= displayColumnCount; column++) {
+            colLefts[column + 1] = colLefts[column] + (parseFloat(colElements[column].style.width) || 0);
+        }
+        const lastColWidth = parseFloat(colElements[displayColumnCount].style.width) || 0;
+        const colLeftAt = (column) => column <= displayColumnCount + 1
+            ? colLefts[column]
+            : colLefts[displayColumnCount + 1] + lastColWidth * (column - displayColumnCount - 1);
+        const rowTopAt = (rowIndex) => rowIndex <= displayRowCount + 1
+            ? rowTops[rowIndex]
+            : bodyHeight + extrapolationRowPx * (rowIndex - displayRowCount - 1);
+
+        const fragment = document.createDocumentFragment();
+        for (const image of images) {
+            if (!image.data_uri) continue;
+
+            const left = colLeftAt(image.from_col + 1) + (image.from_col_off || 0) / EMU_PER_PIXEL;
+            const top = headerHeight + rowTopAt(image.from_row + 1) + (image.from_row_off || 0) / EMU_PER_PIXEL;
+
+            let width;
+            let height;
+            if (image.anchor_type === 'two' && image.to_col != null && image.to_row != null) {
+                const right = colLeftAt(image.to_col + 1) + (image.to_col_off || 0) / EMU_PER_PIXEL;
+                const bottom = headerHeight + rowTopAt(image.to_row + 1) + (image.to_row_off || 0) / EMU_PER_PIXEL;
+                width = Math.max(0, right - left);
+                height = Math.max(0, bottom - top);
+            } else if (image.ext_cx && image.ext_cy) {
+                width = image.ext_cx / EMU_PER_PIXEL;
+                height = image.ext_cy / EMU_PER_PIXEL;
+            }
+
+            const img = document.createElement('img');
+            img.className = 'spreadsheet-image';
+            img.src = image.data_uri;
+            img.alt = '';
+            img.loading = 'lazy';
+            img.decoding = 'async';
+            img.style.left = `${left}px`;
+            img.style.top = `${top}px`;
+            if (width) img.style.width = `${width}px`;
+            if (height) img.style.height = `${height}px`;
+            fragment.appendChild(img);
+        }
+        imagesLayer.replaceChildren(fragment);
+    };
+
+    // Defer once so the header has been laid out, then place.
+    if (imagesLayer) {
+        requestAnimationFrame(placeImages);
+    }
+    // Re-run image placement after geometry changes (e.g. column resize).
+    repositionImages = placeImages;
 
     wrapper.appendChild(gridLayer);
 
     return wrapper;
 }
 
-const EMU_PER_PIXEL = 9525;
+// Set per-render by renderSheetGrid; lets the resize handler re-place images.
+let repositionImages = () => {};
 
-// Overlays each worksheet picture on the grid, translating its
-// SpreadsheetDrawingML anchor (zero-based cell indices + EMU offsets) into
-// pixel coordinates measured from the rendered table.
-function positionSheetImages(table, imagesLayer, images, displayColumnCount) {
-    const headerCells = table.tHead?.rows?.[0]?.cells;
-    const bodyRows = table.tBodies?.[0]?.rows;
-    if (!headerCells || !bodyRows || !bodyRows.length) {
-        return;
-    }
+// Builds a drag handle on a column header that resizes the matching <col>.
+function makeColumnResizer(col, onResize, onResizeEnd) {
+    const MIN_WIDTH = 24;
+    const handle = document.createElement('div');
+    handle.className = 'col-resizer';
 
-    // Column left edge for a 1-based column index (extrapolating past the last
-    // rendered column with its width).
-    const columnLeft = (column) => {
-        if (column <= 1) {
-            return headerCells[1]?.offsetLeft || 0;
-        }
-        if (column <= displayColumnCount) {
-            return headerCells[column].offsetLeft;
-        }
-        const last = headerCells[displayColumnCount];
-        return last.offsetLeft + last.offsetWidth * (column - displayColumnCount);
+    let startX = 0;
+    let startWidth = 0;
+
+    const onMove = (event) => {
+        const next = Math.max(MIN_WIDTH, startWidth + (event.clientX - startX));
+        col.style.width = `${next}px`;
+        onResize();
+    };
+    const onUp = (event) => {
+        handle.releasePointerCapture(event.pointerId);
+        handle.removeEventListener('pointermove', onMove);
+        handle.removeEventListener('pointerup', onUp);
+        document.body.classList.remove('col-resizing');
+        onResizeEnd();
     };
 
-    const rowGeometry = new Map();
-    for (const tr of bodyRows) {
-        const index = Number(tr.dataset.rowIndex);
-        if (!Number.isNaN(index)) {
-            rowGeometry.set(index, { top: tr.offsetTop, height: tr.offsetHeight });
-        }
-    }
-    const renderedIndexes = [...rowGeometry.keys()].sort((a, b) => a - b);
-    const defaultRowHeight = bodyRows[0].offsetHeight || 28;
+    handle.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        startX = event.clientX;
+        startWidth = parseFloat(col.style.width) || 0;
+        handle.setPointerCapture(event.pointerId);
+        handle.addEventListener('pointermove', onMove);
+        handle.addEventListener('pointerup', onUp);
+        document.body.classList.add('col-resizing');
+    });
 
-    // Top edge for a 1-based row index. Rows with no data are not rendered, so
-    // gaps are estimated with the default row height.
-    const rowTop = (rowIndex) => {
-        const exact = rowGeometry.get(rowIndex);
-        if (exact) {
-            return exact.top;
-        }
-        let previous = null;
-        for (const index of renderedIndexes) {
-            if (index <= rowIndex) previous = index;
-            else break;
-        }
-        if (previous !== null) {
-            const info = rowGeometry.get(previous);
-            return info.top + info.height + (rowIndex - previous - 1) * defaultRowHeight;
-        }
-        if (renderedIndexes.length) {
-            const first = renderedIndexes[0];
-            return rowGeometry.get(first).top - (first - rowIndex) * defaultRowHeight;
-        }
-        return (rowIndex - 1) * defaultRowHeight;
-    };
-
-    for (const image of images) {
-        if (!image.data_uri) continue;
-
-        const left = columnLeft(image.from_col + 1) + (image.from_col_off || 0) / EMU_PER_PIXEL;
-        const top = rowTop(image.from_row + 1) + (image.from_row_off || 0) / EMU_PER_PIXEL;
-
-        let width;
-        let height;
-        if (image.anchor_type === 'two' && image.to_col != null && image.to_row != null) {
-            const right = columnLeft(image.to_col + 1) + (image.to_col_off || 0) / EMU_PER_PIXEL;
-            const bottom = rowTop(image.to_row + 1) + (image.to_row_off || 0) / EMU_PER_PIXEL;
-            width = Math.max(0, right - left);
-            height = Math.max(0, bottom - top);
-        } else if (image.ext_cx && image.ext_cy) {
-            width = image.ext_cx / EMU_PER_PIXEL;
-            height = image.ext_cy / EMU_PER_PIXEL;
-        }
-
-        const img = document.createElement('img');
-        img.className = 'spreadsheet-image';
-        img.src = image.data_uri;
-        img.alt = '';
-        img.style.left = `${left}px`;
-        img.style.top = `${top}px`;
-        if (width) img.style.width = `${width}px`;
-        if (height) img.style.height = `${height}px`;
-        imagesLayer.appendChild(img);
-    }
+    return handle;
 }
+
+// Excel stores column widths in "characters of the maximum digit width"; the
+// Calibri 11 digit is ~7px and cells carry ~5px of padding.
+function charsToPixels(chars) {
+    return Math.round(chars * 7) + 5;
+}
+
+// Row heights are stored in points; convert to CSS pixels at 96 DPI.
+function pointsToPixels(points) {
+    return Math.round(points * 96 / 72);
+}
+
+const EMU_PER_PIXEL = 9525;
 
 function renderEmptySheetState() {
     const empty = document.createElement('div');
@@ -653,6 +815,8 @@ function renderDocument(doc) {
     documentView.style.display = 'flex';
     deskContent.replaceChildren();
     deskContent.classList.remove('spreadsheet-content');
+    desk.classList.remove('desk--spreadsheet');
+    setDocumentZoomWheel(true);
     commentsVisible = false;
     commentsPanel.style.display = 'none';
     closeFindBar();

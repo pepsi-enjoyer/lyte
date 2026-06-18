@@ -65,6 +65,9 @@ pub struct DocxParser {
     relationships: Vec<Relationship>,
     referenced_image_ids: HashSet<String>,
     numbering_levels: HashMap<(u32, u8), NumberingLevelInfo>,
+    /// Maps a paragraph style id to the (numId, ilvl) it carries, so paragraphs
+    /// that join a list purely through their style still render as list items.
+    style_numbering: HashMap<String, (u32, u8)>,
 }
 
 impl DocxParser {
@@ -85,6 +88,7 @@ impl DocxParser {
             relationships: Vec::new(),
             referenced_image_ids: HashSet::new(),
             numbering_levels: HashMap::new(),
+            style_numbering: HashMap::new(),
         };
 
         // Validate required files
@@ -104,8 +108,19 @@ impl DocxParser {
     pub fn parse(&mut self) -> Result<Document> {
         let mut document = Document::new();
 
-        document.body = self.parse_document_body()?;
+        // Styles must be resolved before the body so paragraphs can inherit list
+        // membership from their paragraph style.
         document.styles = self.parse_styles().unwrap_or_default();
+        self.style_numbering = document
+            .styles
+            .iter()
+            .filter_map(|(id, style)| {
+                style
+                    .num_id
+                    .map(|num_id| (id.clone(), (num_id, style.ilvl.unwrap_or(0))))
+            })
+            .collect();
+        document.body = self.parse_document_body()?;
         let comment_threads = self.parse_comment_threads().unwrap_or_default();
         document.comments = self.parse_comments().unwrap_or_default();
         self.attach_comment_threads(&mut document.comments, comment_threads);
@@ -386,22 +401,35 @@ impl DocxParser {
                             if let Some(pctx) = para_stack.pop() {
                                 let page_break = pctx.has_page_break_after;
 
-                                // Compute list info
-                                let (list_level, list_format) = match (pctx.num_id, pctx.ilvl) {
-                                    (Some(num_id), Some(ilvl)) if num_id > 0 => {
+                                // Compute list info. A paragraph joins a list either
+                                // through an inline numPr or through its paragraph
+                                // style; ilvl defaults to 0 when omitted.
+                                let style_list = pctx
+                                    .style
+                                    .as_ref()
+                                    .and_then(|id| self.style_numbering.get(id))
+                                    .copied();
+                                let effective_num_id =
+                                    pctx.num_id.or(style_list.map(|(num_id, _)| num_id));
+                                let effective_ilvl = pctx
+                                    .ilvl
+                                    .or(style_list.map(|(_, ilvl)| ilvl))
+                                    .unwrap_or(0);
+                                let (list_level, list_format) = match effective_num_id {
+                                    Some(num_id) if num_id > 0 => {
                                         if let Some(info) =
-                                            self.numbering_levels.get(&(num_id, ilvl))
+                                            self.numbering_levels.get(&(num_id, effective_ilvl))
                                         {
                                             let counter = list_counters
-                                                .entry((num_id, ilvl))
+                                                .entry((num_id, effective_ilvl))
                                                 .or_insert(info.start.saturating_sub(1));
                                             *counter += 1;
-                                            for higher in (ilvl + 1)..=8 {
+                                            for higher in (effective_ilvl + 1)..=8 {
                                                 list_counters.remove(&(num_id, higher));
                                             }
-                                            (Some(ilvl), Some(info.num_fmt.clone()))
+                                            (Some(effective_ilvl), Some(info.num_fmt.clone()))
                                         } else {
-                                            (Some(ilvl), Some("bullet".to_string()))
+                                            (Some(effective_ilvl), Some("bullet".to_string()))
                                         }
                                     }
                                     _ => (None, None),
@@ -473,6 +501,7 @@ impl DocxParser {
         let mut current_style = Style::new();
         let mut in_rpr = false;
         let mut in_ppr = false;
+        let mut in_style_num_pr = false;
 
         loop {
             match reader.read_event_into(&mut buf) {
@@ -514,6 +543,13 @@ impl DocxParser {
                         }
                         b"w:rPr" => in_rpr = true,
                         b"w:pPr" => in_ppr = true,
+                        b"w:numPr" if in_ppr => in_style_num_pr = true,
+                        b"w:numId" if in_style_num_pr => {
+                            current_style.num_id = get_attr(e, b"w:val").and_then(|v| v.parse().ok());
+                        }
+                        b"w:ilvl" if in_style_num_pr => {
+                            current_style.ilvl = get_attr(e, b"w:val").and_then(|v| v.parse().ok());
+                        }
                         b"w:jc" if in_ppr => {
                             current_style.alignment = get_attr(e, b"w:val");
                         }
@@ -550,6 +586,7 @@ impl DocxParser {
                     }
                     b"w:rPr" => in_rpr = false,
                     b"w:pPr" => in_ppr = false,
+                    b"w:numPr" => in_style_num_pr = false,
                     _ => {}
                 },
                 Ok(Event::Eof) => break,
@@ -590,6 +627,12 @@ impl DocxParser {
                     }
                     if resolved.heading_level.is_none() {
                         resolved.heading_level = base.heading_level;
+                    }
+                    if resolved.num_id.is_none() {
+                        resolved.num_id = base.num_id;
+                        if resolved.ilvl.is_none() {
+                            resolved.ilvl = base.ilvl;
+                        }
                     }
                     base_id = base.based_on.clone();
                 } else {
@@ -823,18 +866,41 @@ impl DocxParser {
             };
 
             let lower = full_path.to_lowercase();
-            if lower.ends_with(".emf") || lower.ends_with(".wmf") {
-                images.insert(rel_id, self.placeholder_data_uri(&full_path));
-                continue;
-            }
+            let is_emf = lower.ends_with(".emf");
+            let is_wmf = lower.ends_with(".wmf");
 
-            if let Ok(mut file) = self.archive.by_name(&full_path) {
-                let mut buffer = Vec::with_capacity(file.size() as usize);
-                if file.read_to_end(&mut buffer).is_ok() {
-                    let mime = mime_for_path(&full_path);
-                    let b64 = base64::engine::general_purpose::STANDARD.encode(&buffer);
-                    images.insert(rel_id, format!("data:{};base64,{}", mime, b64));
+            // Read the bytes in a scope so the archive borrow is released before
+            // we call other &self methods (e.g. placeholder_data_uri).
+            let bytes = match self.archive.by_name(&full_path) {
+                Ok(mut file) => {
+                    let mut buffer = Vec::with_capacity(file.size() as usize);
+                    file.read_to_end(&mut buffer).ok().map(|_| buffer)
                 }
+                Err(_) => None,
+            };
+
+            let Some(buffer) = bytes else {
+                if is_emf || is_wmf {
+                    images.insert(rel_id, self.placeholder_data_uri(&full_path));
+                }
+                continue;
+            };
+
+            // EMF is a vector format browsers can't show; rasterize it to PNG.
+            if is_emf {
+                if let Some(png) = crate::emf::emf_to_png(&buffer) {
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+                    images.insert(rel_id, format!("data:image/png;base64,{}", b64));
+                } else {
+                    images.insert(rel_id, self.placeholder_data_uri(&full_path));
+                }
+            } else if is_wmf {
+                // WMF is not yet rasterized; show a placeholder.
+                images.insert(rel_id, self.placeholder_data_uri(&full_path));
+            } else {
+                let mime = mime_for_path(&full_path);
+                let b64 = base64::engine::general_purpose::STANDARD.encode(&buffer);
+                images.insert(rel_id, format!("data:{};base64,{}", mime, b64));
             }
         }
 
