@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use hermes_app::csv_parser;
 use hermes_app::excel_parser;
 use hermes_app::model::Document;
 use hermes_app::parser::DocxParser;
@@ -38,6 +39,7 @@ enum FileKind {
 enum SpreadsheetKind {
     OpenXml,
     BinaryOrLegacy,
+    Csv,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -60,7 +62,7 @@ fn open_docx(path: String, app: tauri::AppHandle) -> Result<Document, String> {
 #[tauri::command]
 fn open_file(path: String, app: tauri::AppHandle) -> Result<OpenedFile, String> {
     let file_kind = file_kind_from_path(Path::new(&path)).ok_or_else(|| {
-        "Unsupported file type. Hermes can open .docx, .xlsx, .xlsm, .xlsb, and .xls files."
+        "Unsupported file type. Hermes can open .docx, .xlsx, .xlsm, .xlsb, .xls, and .csv files."
             .to_string()
     })?;
 
@@ -164,6 +166,20 @@ fn parse_spreadsheet_workbook(path: &str, kind: SpreadsheetKind) -> Result<XlsxW
             );
             Ok(workbook)
         }
+        SpreadsheetKind::Csv => {
+            println!("Opening CSV file: {}", path);
+            let workbook = csv_parser::parse_workbook(path)?;
+            let active_rows = workbook
+                .active_sheet
+                .as_ref()
+                .map(|sheet| sheet.rows.len())
+                .unwrap_or_default();
+            println!(
+                "Successfully parsed CSV file: {} preview rows",
+                active_rows
+            );
+            Ok(workbook)
+        }
     }
 }
 
@@ -184,6 +200,10 @@ fn parse_spreadsheet_sheet(
         SpreadsheetKind::BinaryOrLegacy => {
             println!("Opening Excel sheet {} from file: {}", sheet_index, path);
             excel_parser::parse_sheet(path, sheet_index)
+        }
+        SpreadsheetKind::Csv => {
+            println!("Opening CSV sheet {} from file: {}", sheet_index, path);
+            csv_parser::parse_sheet(path, sheet_index)
         }
     }
 }
@@ -352,6 +372,7 @@ fn file_kind_from_path(path: &Path) -> Option<FileKind> {
         Some("docx") => Some(FileKind::Docx),
         Some("xlsx") | Some("xlsm") => Some(FileKind::Spreadsheet(SpreadsheetKind::OpenXml)),
         Some("xls") | Some("xlsb") => Some(FileKind::Spreadsheet(SpreadsheetKind::BinaryOrLegacy)),
+        Some("csv") => Some(FileKind::Spreadsheet(SpreadsheetKind::Csv)),
         _ => None,
     }
 }

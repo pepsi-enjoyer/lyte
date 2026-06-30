@@ -76,6 +76,13 @@
         "description": "Microsoft Excel 97-2003 workbook",
         "role": "Viewer",
         "mimeType": "application/vnd.ms-excel"
+      },
+      {
+        "ext": ["csv"],
+        "name": "Hermes CSV File",
+        "description": "Comma-separated values file",
+        "role": "Viewer",
+        "mimeType": "text/csv"
       }
     ]
   }

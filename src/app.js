@@ -25,7 +25,7 @@ const DOC_ZOOM_DEFAULT = 1;
 const DOC_ZOOM_MIN = 0.5;
 const DOC_ZOOM_MAX = 2;
 const DOC_ZOOM_STEP = 0.1;
-const SUPPORTED_SPREADSHEET_EXTENSIONS = ['xlsx', 'xlsm', 'xlsb', 'xls'];
+const SUPPORTED_SPREADSHEET_EXTENSIONS = ['xlsx', 'xlsm', 'xlsb', 'xls', 'csv'];
 
 // State
 let currentDocument = null;
