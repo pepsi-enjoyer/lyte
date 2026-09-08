@@ -1,12 +1,12 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use hermes_app::csv_parser;
-use hermes_app::excel_parser;
-use hermes_app::model::Document;
-use hermes_app::parser::DocxParser;
-use hermes_app::xlsx_model::{XlsxSheet, XlsxWorkbook};
-use hermes_app::xlsx_parser::XlsxParser;
+use relaydeck_app::csv_parser;
+use relaydeck_app::excel_parser;
+use relaydeck_app::model::Document;
+use relaydeck_app::parser::DocxParser;
+use relaydeck_app::xlsx_model::{XlsxSheet, XlsxWorkbook};
+use relaydeck_app::xlsx_parser::XlsxParser;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -62,7 +62,7 @@ fn open_docx(path: String, app: tauri::AppHandle) -> Result<Document, String> {
 #[tauri::command]
 fn open_file(path: String, app: tauri::AppHandle) -> Result<OpenedFile, String> {
     let file_kind = file_kind_from_path(Path::new(&path)).ok_or_else(|| {
-        "Unsupported file type. Hermes can open .docx, .xlsx, .xlsm, .xlsb, .xls, and .csv files."
+        "Unsupported file type. Relaydeck can open .docx, .xlsx, .xlsm, .xlsb, .xls, and .csv files."
             .to_string()
     })?;
 

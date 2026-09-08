@@ -1,5 +1,5 @@
 [package]
-name = "hermes"
+name = "relaydeck"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,7 +8,7 @@ name = "main"
 path = "src-rust/main.rs"
 
 [lib]
-name = "hermes"
+name = "relaydeck"
 path = "src-rust/lib.rs"
 
 [dependencies]

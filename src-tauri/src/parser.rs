@@ -1668,7 +1668,7 @@ mod tests {
 
     fn write_test_docx(files: &[(&str, &str)]) -> PathBuf {
         let path = std::env::temp_dir().join(format!(
-            "hermes-parser-test-{}-{}.docx",
+            "relaydeck-parser-test-{}-{}.docx",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)

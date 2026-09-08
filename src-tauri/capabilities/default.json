@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default capabilities for Hermes",
+  "description": "Default capabilities for Relaydeck",
   "windows": ["main"],
   "permissions": [
     "core:default",

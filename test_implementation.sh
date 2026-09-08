@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Test script for hermes DOCX parser
+# Test script for relaydeck DOCX parser
 # This script demonstrates the document model and parser implementation
 
-echo "🧪 Testing Hermes Document Model and Parser"
+echo "🧪 Testing Relaydeck Document Model and Parser"
 echo "============================================="
 
 # Test compilation

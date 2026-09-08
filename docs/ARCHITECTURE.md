@@ -1,8 +1,8 @@
-# Hermes Architecture
+# Relaydeck Architecture
 
 ## Overview
 
-Hermes is a read-only DOCX and XLSX viewer built as a Tauri desktop app with a Rust parsing backend and a vanilla HTML/CSS/JS frontend. The main runtime path is:
+Relaydeck is a read-only DOCX and XLSX viewer built as a Tauri desktop app with a Rust parsing backend and a vanilla HTML/CSS/JS frontend. The main runtime path is:
 
 1. the frontend asks the Tauri backend to open a supported file
 2. the Rust backend detects DOCX or XLSX and parses the OOXML ZIP package into a structured model
@@ -119,7 +119,7 @@ This keeps the parser organized around OOXML parts instead of handling everythin
 - `xl/styles.xml` for basic number/date/text formats
 - the active worksheet XML
 
-The parser returns a sparse `XlsxWorkbook` model with sheet summaries and one loaded sheet. Additional sheets are loaded on demand through `open_xlsx_sheet`, so Hermes does not parse every sheet before showing the workbook.
+The parser returns a sparse `XlsxWorkbook` model with sheet summaries and one loaded sheet. Additional sheets are loaded on demand through `open_xlsx_sheet`, so Relaydeck does not parse every sheet before showing the workbook.
 
 The XLSX path is intentionally a preview path. It displays cached formula values when present, but does not evaluate formulas or render charts, pivots, macros, embedded objects, or full Excel-compatible layout.
 
@@ -301,7 +301,7 @@ These behaviors are intentionally kept client-side because they mostly operate o
 
 ## Performance and Footprint
 
-Hermes is intentionally built around a small runtime and a fairly direct rendering pipeline. There is not a separate recent "performance-only" change list in the visible git history, but the current codebase already includes several performance-oriented measures.
+Relaydeck is intentionally built around a small runtime and a fairly direct rendering pipeline. There is not a separate recent "performance-only" change list in the visible git history, but the current codebase already includes several performance-oriented measures.
 
 ### Lightweight Runtime Choices
 
@@ -338,7 +338,7 @@ Hermes is intentionally built around a small runtime and a fairly direct renderi
 
 ### Tradeoffs and Remaining Gaps
 
-- OOXML parts are still read into strings before parsing, so Hermes is not fully streaming end-to-end.
+- OOXML parts are still read into strings before parsing, so Relaydeck is not fully streaming end-to-end.
 - The frontend currently rerenders the full document on open instead of virtualizing or incrementally updating very large documents.
 - Images are embedded as data URIs for simple rendering, which is convenient but can increase payload size for image-heavy files.
 - XLSX support is a fast preview path, not a full spreadsheet engine.
@@ -406,9 +406,9 @@ That means `cargo tauri dev` currently expects a frontend dev server at `http://
 
 ## Current Product Boundaries and Limitations
 
-- Hermes is a viewer, not an editor.
+- Relaydeck is a viewer, not an editor.
 - There is no support for editing or saving back to DOCX or XLSX.
-- Hermes does not aim for full OOXML compatibility.
+- Relaydeck does not aim for full OOXML compatibility.
 - Macros, embedded OLE content, charts, pivot tables, formula evaluation, and similar advanced document features are not supported.
 - Pagination is driven by explicit page breaks rather than a full layout engine.
 - Very large or structurally complex documents and workbooks may need graceful degradation in the renderer.
@@ -417,7 +417,7 @@ That means `cargo tauri dev` currently expects a frontend dev server at `http://
 
 ## Extension Points
 
-If Hermes grows, the cleanest extension seams are:
+If Relaydeck grows, the cleanest extension seams are:
 
 - expanding the `Document` model in `src-tauri/src/model.rs`
 - adding parser phases in `src-tauri/src/parser.rs`
