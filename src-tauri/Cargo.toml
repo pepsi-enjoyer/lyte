@@ -1,5 +1,5 @@
 [package]
-name = "relaydeck-app"
+name = "lyte-app"
 version = "0.0.1"
 description = "DOCX and XLSX viewer with Tauri"
 authors = ["you"]
@@ -18,7 +18,7 @@ calamine = "0.35"
 csv = "1"
 
 # Use the existing DOCX parsing library
-relaydeck = { path = ".." }
+lyte = { path = ".." }
 
 # Additional DOCX processing dependencies
 zip = "4"

@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Test script for relaydeck DOCX parser
+# Test script for lyte DOCX parser
 # This script demonstrates the document model and parser implementation
 
-echo "🧪 Testing Relaydeck Document Model and Parser"
+echo "🧪 Testing Lyte Document Model and Parser"
 echo "============================================="
 
 # Test compilation

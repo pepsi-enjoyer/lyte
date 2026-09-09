@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2.0.0",
-  "productName": "Relaydeck",
+  "productName": "Lyte",
   "version": "0.0.1",
-  "identifier": "com.pepsienjoyer.relaydeck",
+  "identifier": "com.pepsienjoyer.lyte",
   "build": {
     "frontendDist": "../src",
     "beforeDevCommand": "",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Relaydeck",
+        "title": "Lyte",
         "width": 1200,
         "height": 800,
         "minWidth": 800,
@@ -44,42 +44,42 @@
     "fileAssociations": [
       {
         "ext": ["docx"],
-        "name": "Relaydeck Word Document",
+        "name": "Lyte Word Document",
         "description": "Microsoft Word document",
         "role": "Viewer",
         "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       },
       {
         "ext": ["xlsx"],
-        "name": "Relaydeck Excel Workbook",
+        "name": "Lyte Excel Workbook",
         "description": "Microsoft Excel workbook",
         "role": "Viewer",
         "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
       },
       {
         "ext": ["xlsm"],
-        "name": "Relaydeck Excel Macro-Enabled Workbook",
+        "name": "Lyte Excel Macro-Enabled Workbook",
         "description": "Microsoft Excel macro-enabled workbook",
         "role": "Viewer",
         "mimeType": "application/vnd.ms-excel.sheet.macroEnabled.12"
       },
       {
         "ext": ["xlsb"],
-        "name": "Relaydeck Excel Binary Workbook",
+        "name": "Lyte Excel Binary Workbook",
         "description": "Microsoft Excel binary workbook",
         "role": "Viewer",
         "mimeType": "application/vnd.ms-excel.sheet.binary.macroEnabled.12"
       },
       {
         "ext": ["xls"],
-        "name": "Relaydeck Excel 97-2003 Workbook",
+        "name": "Lyte Excel 97-2003 Workbook",
         "description": "Microsoft Excel 97-2003 workbook",
         "role": "Viewer",
         "mimeType": "application/vnd.ms-excel"
       },
       {
         "ext": ["csv"],
-        "name": "Relaydeck CSV File",
+        "name": "Lyte CSV File",
         "description": "Comma-separated values file",
         "role": "Viewer",
         "mimeType": "text/csv"

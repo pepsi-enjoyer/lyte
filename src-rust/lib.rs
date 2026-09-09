@@ -1,4 +1,4 @@
-//! Relaydeck DOCX Parser Library
+//! Lyte DOCX Parser Library
 //! 
 //! A lightweight, read-only DOCX parser focused on extracting structured content
 //! for rendering in a Tauri-based document viewer.

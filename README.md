@@ -1,6 +1,6 @@
-# Relaydeck
+# Lyte
 
-Relaydeck is a lightweight, read-only DOCX and XLSX viewer built with Rust and Tauri. The goal is simple: open Office documents quickly, render useful content, and avoid the overhead of launching a full editor when you only need to read.
+Lyte is a lightweight, read-only DOCX and XLSX viewer built with Rust and Tauri. The goal is simple: open Office documents quickly, render useful content, and avoid the overhead of launching a full editor when you only need to read.
 
 ## Installation
 
@@ -16,7 +16,7 @@ This repository currently documents installation from source. You will need:
 cargo install tauri-cli
 ```
 
-2. Build the Relaydeck desktop app from the repository root:
+2. Build the Lyte desktop app from the repository root:
 
 ```bash
 cargo tauri build
@@ -37,7 +37,7 @@ cargo build --manifest-path src-tauri/Cargo.toml
 
 ## How to Use
 
-1. Launch Relaydeck.
+1. Launch Lyte.
 2. Open a `.docx` or `.xlsx` file from the welcome screen or the toolbar.
 3. You can also drag and drop a `.docx` or `.xlsx` file onto the window, or reopen a file from the recent files list.
 4. Use the toolbar or keyboard shortcuts to search the document, show comments for DOCX files, and switch themes.
@@ -50,11 +50,11 @@ Useful shortcuts:
 - `Ctrl+Mouse Wheel` zoom the document in or out
 - `Ctrl+]` show or hide comments
 - `Ctrl+D` toggle light and dark theme
-- `Ctrl+Q` quit Relaydeck
+- `Ctrl+Q` quit Lyte
 
-## What Relaydeck Supports
+## What Lyte Supports
 
-Relaydeck is a read-only viewer and currently supports:
+Lyte is a read-only viewer and currently supports:
 
 - `.docx` documents
 - paragraphs and styled text runs
@@ -72,7 +72,7 @@ Relaydeck is a read-only viewer and currently supports:
 
 ## Useful Notes
 
-- Relaydeck opens `.docx` and `.xlsx` files for reading only. It does not edit or save documents.
+- Lyte opens `.docx` and `.xlsx` files for reading only. It does not edit or save documents.
 - XLSX support is a fast preview path. It does not evaluate formulas or render charts, pivot tables, macros, embedded objects, or full Excel-compatible layout.
 - Recent files are stored locally by the desktop app so you can reopen them quickly.
 - For architecture, development notes, and current technical limitations, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

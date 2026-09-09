@@ -20,7 +20,7 @@ const findBar = document.getElementById('find-bar');
 const findInput = document.getElementById('find-input');
 const findCount = document.getElementById('find-count');
 
-const DOC_ZOOM_STORAGE_KEY = 'relaydeck-doc-zoom';
+const DOC_ZOOM_STORAGE_KEY = 'lyte-doc-zoom';
 const DOC_ZOOM_DEFAULT = 1;
 const DOC_ZOOM_MIN = 0.5;
 const DOC_ZOOM_MAX = 2;
@@ -367,7 +367,7 @@ function renderOpenedFile(openedFile) {
         return;
     }
 
-    showError('Unsupported file response from Relaydeck.');
+    showError('Unsupported file response from Lyte.');
 }
 
 function renderWorkbook(workbook) {
@@ -402,8 +402,8 @@ function renderWorkbook(workbook) {
 
     deskContent.appendChild(container);
 
-    const filename = getFileName(currentFilePath) || 'Relaydeck';
-    document.title = filename + ' - Relaydeck';
+    const filename = getFileName(currentFilePath) || 'Lyte';
+    document.title = filename + ' - Lyte';
 }
 
 function renderWorkbookHeader(workbook, sheet) {
@@ -801,7 +801,7 @@ function renderEmptySheetState() {
     empty.className = 'spreadsheet-empty';
     empty.innerHTML = `
         <h2>This sheet is empty</h2>
-        <p>Relaydeck opened the workbook, but this sheet has no visible preview cells.</p>
+        <p>Lyte opened the workbook, but this sheet has no visible preview cells.</p>
     `;
     return empty;
 }
@@ -844,8 +844,8 @@ function renderDocument(doc) {
         commentsPanel.style.display = 'flex';
     }
 
-    const filename = getFileName(currentFilePath) || 'Relaydeck';
-    document.title = filename + ' - Relaydeck';
+    const filename = getFileName(currentFilePath) || 'Lyte';
+    document.title = filename + ' - Lyte';
 
     if (findInput.value.trim()) {
         scheduleFind();
@@ -914,7 +914,7 @@ function renderEmptyDocumentPage() {
     content.innerHTML = `
         <div class="doc-empty-state">
             <h2>This document is empty</h2>
-            <p>Relaydeck opened the file, but there is no visible body content to render yet.</p>
+            <p>Lyte opened the file, but there is no visible body content to render yet.</p>
         </div>
     `;
     page.appendChild(content);
@@ -1405,9 +1405,9 @@ function clearFindHighlights() {
 // --- Theme ---
 
 async function initializeTheme() {
-    const localTheme = normalizeTheme(localStorage.getItem('relaydeck-theme')) || 'light';
+    const localTheme = normalizeTheme(localStorage.getItem('lyte-theme')) || 'light';
     applyTheme(localTheme);
-    localStorage.setItem('relaydeck-theme', localTheme);
+    localStorage.setItem('lyte-theme', localTheme);
 
     if (!invoke) return;
 
@@ -1416,7 +1416,7 @@ async function initializeTheme() {
         if (!savedTheme) return;
 
         applyTheme(savedTheme);
-        localStorage.setItem('relaydeck-theme', savedTheme);
+        localStorage.setItem('lyte-theme', savedTheme);
     } catch (err) {
         console.log('Could not load theme preference:', err);
     }
@@ -1427,7 +1427,7 @@ function hasTauriApi() {
 }
 
 function reportMissingTauriApi() {
-    const message = 'Relaydeck failed to load its Tauri desktop APIs. Rebuild the app after enabling withGlobalTauri in tauri.conf.json.';
+    const message = 'Lyte failed to load its Tauri desktop APIs. Rebuild the app after enabling withGlobalTauri in tauri.conf.json.';
     if (fileInfo) {
         fileInfo.textContent = message;
         fileInfo.style.color = '#e74c3c';
@@ -1443,7 +1443,7 @@ function toggleTheme() {
 async function setTheme(theme) {
     const normalizedTheme = normalizeTheme(theme) || 'light';
     applyTheme(normalizedTheme);
-    localStorage.setItem('relaydeck-theme', normalizedTheme);
+    localStorage.setItem('lyte-theme', normalizedTheme);
 
     if (!invoke) return;
 

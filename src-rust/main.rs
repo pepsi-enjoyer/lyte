@@ -1,8 +1,8 @@
-use relaydeck::DocxParser;
+use lyte::DocxParser;
 use std::io::Cursor;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Relaydeck DOCX Comment Parser Demo");
+    println!("Lyte DOCX Comment Parser Demo");
     
     // Example comments.xml content for demonstration
     let comments_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
